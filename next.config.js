@@ -1,4 +1,5 @@
 module.exports = {
+  output: 'export',
   webpack: (config, { dev, isServer }) => {
     // Ensure you’re not disabling Hot Module Replacement
     if (dev && !isServer) {
