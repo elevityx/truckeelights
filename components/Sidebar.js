@@ -123,7 +123,7 @@ const Sidebar = ({ addMarker, onSelectHouse, houses, closeSidebar }) => {
             </form>
 
             <p className="text-sm text-gray-200">
-                🎄 Click on the map to add a house or use the forms above to add/find a house with Christmas lights.
+                🎄 Click on the map to add a house or use the search above to add/find a house with Christmas lights.
             </p>
         </div>
     );

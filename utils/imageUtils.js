@@ -14,17 +14,33 @@ const imageConfig = {
  * @returns {Promise<File>} The resized and compressed image file.
  */
 export const resizeImage = async (imageFile) => {
-  try {
-    const resizedImage = await readAndCompressImage(imageFile, imageConfig);
-    
-    // Verify if the name is preserved; if not, set it manually
-    if (!resizedImage.name && imageFile.name) {
-      Object.defineProperty(resizedImage, 'name', { value: imageFile.name, writable: true });
+  let quality = 0.7;
+  let resizedImage;
+  const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+  while (quality > 0.1) { // Prevent quality from going too low
+    try {
+      const resizedImageBlob = await readAndCompressImage(imageFile, { ...imageConfig, quality });
+      const tempImage = new File([resizedImageBlob], imageFile.name, {
+        type: imageFile.type,
+        lastModified: Date.now(),
+      });
+
+      if (tempImage.size <= MAX_SIZE_BYTES) {
+        resizedImage = tempImage;
+        break;
+      }
+
+      quality -= 0.1; // Decrease quality and retry
+    } catch (error) {
+      console.error("Error resizing image:", error);
+      throw error;
     }
-    
-    return resizedImage;
-  } catch (error) {
-    console.error("Error resizing image:", error);
-    throw error;
   }
+
+  if (!resizedImage) {
+    throw new Error("Unable to resize image to meet the size requirements.");
+  }
+
+  return resizedImage;
 };

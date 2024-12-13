@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import dynamic from 'next/dynamic';
-import { collection, addDoc, getDocs, query, orderBy, where } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, orderBy, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
@@ -99,23 +99,23 @@ export default function Home() {
                 normalizedAddress: normalizedAddress, // Store normalized address
                 location: location,
                 hasLights: true, // Since all houses have lights
-                createdAt: new Date(),
+                createdAt: serverTimestamp(), // Use serverTimestamp for accurate timing
                 photos: [], // Initialize with empty photos array
             });
 
             console.log("Document written with ID: ", docRef.id);
 
-            // Update local houses state
+            // Update local houses state using functional update
             const newHouse = {
                 id: docRef.id,
                 address,
                 normalizedAddress,
                 location,
                 hasLights: true,
-                createdAt: new Date(),
+                createdAt: new Date(), // Optionally, fetch the actual timestamp from Firestore
                 photos: [],
             };
-            setHouses([newHouse, ...houses]);
+            setHouses((prevHouses) => [newHouse, ...prevHouses]);
             setSelectedHouse(newHouse); // Select the new house
         } catch (error) {
             console.error("Error adding document: ", error);
