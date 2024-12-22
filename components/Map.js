@@ -284,12 +284,13 @@ const Map = ({ houses, addMarker, selectedHouse, onSelectHouse }) => {
                   // Get the download URL
                   const downloadURL = await getDownloadURL(storageRef);
 
-                  // Add photo metadata to Firestore subcollection
+                  // Add photo metadata to Firestore subcollection with 'reviewed' set to false
                   await addDoc(collection(db, 'houses', house.id, 'photos'), {
                     downloadURL,
                     storagePath: storageRef.fullPath,
                     uploadedAt: serverTimestamp(),
                     fileName: optimizedFile.name,
+                    reviewed: false, // New field indicating review status
                   });
                 });
 
