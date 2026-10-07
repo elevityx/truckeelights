@@ -1,5 +1,6 @@
 import type { PinView, Season } from '@/lib/data/types';
-import { GLYPHS, pickGlyph } from '@/lib/maps/glyphs';
+import { pickGlyph } from '@/lib/maps/glyphs';
+import Glyph from './Glyph';
 import { THEMES } from '@/lib/theme/themes';
 import { firstSegment, groupByStreet, restSegment } from '@/lib/text/address';
 
@@ -37,8 +38,9 @@ export default function ListView({ season, year, pins, onOpen }: Props) {
               {g.items.map((p) => (
                 <li key={p.id}>
                   <button type="button" className="row" onClick={() => onOpen(p.id)}>
-                    {/* constant glyph markup, never built from data */}
-                    <span className="g" dangerouslySetInnerHTML={{ __html: GLYPHS[pickGlyph(p.id, season)] }} />
+                    <span className="g">
+                      <Glyph name={pickGlyph(p.id, season)} />
+                    </span>
                     <span className="a">
                       {firstSegment(p.address)}
                       <span className="b">{restSegment(p.address)}</span>
