@@ -9,10 +9,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:start": "supabase start",
+    "db:start": "sh supabase/start-local.sh",
     "db:reset": "supabase db reset",
     "db:test": "supabase test db",
-    "test:concurrency": "node --test tests/db-concurrency/"
+    "test:concurrency": "node --test 'tests/db-concurrency/*.test.mjs'"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "2.1.3",
