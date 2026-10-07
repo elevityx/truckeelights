@@ -228,8 +228,10 @@ label.lbl{font-weight:700; font-size:14.5px}
 }
 
 /* ---------- v2: Truckee touches (decorative, aria-hidden) ---------- */
-.ridge{position:absolute; left:0; right:0; top:0; height:92px; pointer-events:none; z-index:2}
-.bar~.pbody .ridge{top:12px}
+/* Ridge sits behind the header content; the header's own height is unchanged. */
+.ridge{position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0; opacity:.6}
+.bar>.wm,.bar>.meta,.bar>.bar-actions{position:relative; z-index:1}
+.bar .ridge .lbl{display:none}
 .ridge svg{width:100%; height:100%; display:block}
 .ridge .lbl{font:700 9px var(--body); letter-spacing:.24em; fill:var(--map-label); opacity:.7}
 .portal-glow{animation:pglow 3.6s ease-in-out infinite alternate}
@@ -270,7 +272,6 @@ label.lbl{font-weight:700; font-size:14.5px}
 .mapwrap .empty{position:absolute; inset:0; display:grid; place-content:center; z-index:3}
 .pin.pin-adv{position:relative; transform:none}
 .pin.pin-adv .plabel{top:100%}
-.bar~.pbody .ridge{top:12px}
 .pbody{min-height:0}
 .lore{flex:none}
 .err-page{padding:40px 16px; text-align:center}

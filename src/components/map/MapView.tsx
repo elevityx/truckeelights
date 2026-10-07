@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { PinView, Region, Season } from '@/lib/data/types';
 import { getMapAdapter } from '@/lib/maps';
 import type { MapAdapter } from '@/lib/maps/types';
-import { Fog, Ridge, Troll } from './Decor';
+import { Fog, Troll } from './Decor';
 
 interface Props {
   season: Season;
@@ -60,7 +60,6 @@ export default function MapView({ season, region, pins, selectedId, onSelect }: 
   return (
     <div className="mapwrap" aria-label={`Map of ${region.name} houses. Use the List view for a text version.`}>
       <div ref={host} className="mapdiv" />
-      <Ridge season={season} />
       {H && <Fog />}
       {H && <Troll />}
       <p className="maphint">Tap a {H ? 'pumpkin' : 'tree'}</p>
