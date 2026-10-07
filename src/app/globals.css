@@ -46,11 +46,13 @@ body{display:flex; flex-direction:column; height:100dvh; background:var(--bg); c
 .iconbtn svg{width:20px; height:20px}
 
 /* Header */
-/* Quiet bar: one row (wordmark + sub line, Add a house), then the ridge band, then the drip/lights trim. */
-:root{--row-h:66px; --band-h:56px}
+/* Quiet bar. Narrow: wordmark + sub line and Add a house, then a short ridge band. Wide (1024+): one row, with the
+   ridge scene in the open span between the wordmark block and Add a house. The drip/lights trim hangs below. */
+:root{--row-h:60px; --band-h:40px}
 .bar{position:relative; z-index:10; flex:none; background:linear-gradient(180deg,var(--bar-a) 0%,var(--bar-a) 45%,var(--bar-b) 100%)}
-.bar-row{display:flex; align-items:center; justify-content:space-between; gap:12px; height:var(--row-h); padding:6px 16px 0}
-.bar-id{display:grid; gap:5px; min-width:0}
+.bar-row{display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"id add" "ridge ridge"; grid-template-rows:var(--row-h) var(--band-h); align-items:center; column-gap:12px; padding:0 16px}
+.bar-id{grid-area:id; display:grid; gap:4px; min-width:0; padding-top:4px}
+.bar .add{grid-area:add}
 .wm{margin:0; color:var(--wm); text-shadow:var(--wm-shadow); line-height:1; font-size:clamp(26px, 7.4vw, 46px); min-width:0; overflow-wrap:anywhere}
 .bar .wm{font-size:clamp(21px, 7.3vw, 29px); white-space:nowrap; overflow-wrap:normal}
 .wm .w2{color:var(--wm2)}
@@ -116,7 +118,8 @@ body{display:flex; flex-direction:column; height:100dvh; background:var(--bg); c
 @keyframes blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
 .mapctl{position:absolute; right:12px; top:14px; display:flex; flex-direction:column; gap:8px; z-index:3}
 .bar~.pbody .mapctl{top:30px}
-.maphint{position:absolute; right:12px; bottom:12px; margin:0; font-size:12.5px; color:var(--muted); background:var(--scrim); padding:4px 10px; border-radius:999px; pointer-events:none}
+.maphint{position:absolute; left:50%; top:34px; transform:translateX(-50%); z-index:4; margin:0; font-size:13px; font-weight:700; white-space:nowrap; color:var(--text); background:var(--scrim); border:1px solid var(--line); padding:4px 12px; border-radius:999px; pointer-events:none; transition:opacity .5s}
+.maphint.gone{opacity:0}
 
 .pin{position:absolute; width:46px; height:46px; margin:0; padding:0; border:0; background:none; transform:translate(-50%,-80%); cursor:pointer; display:grid; place-items:center; z-index:1}
 .pin .glyph{width:38px; height:38px; display:block; filter:drop-shadow(0 0 7px var(--g)); animation:flick 3.4s infinite; animation-delay:var(--d)}
@@ -232,8 +235,9 @@ label.lbl{font-weight:700; font-size:14.5px}
 
 /* Desktop layout inside the frame */
 @media (min-width:760px){
-  :root{--row-h:84px; --band-h:72px}
-  .bar-row{padding:10px 24px 0}
+  :root{--row-h:68px; --band-h:48px}
+  .bar-row{padding:0 24px}
+  .bar .ridge{margin:0 -24px}
   .bar .wm{font-size:40px}
   .sub{font-size:14px}
   .bar .add{padding:0 20px; font-size:16px}
@@ -249,7 +253,12 @@ label.lbl{font-weight:700; font-size:14.5px}
 /* ---------- v2: Truckee touches (decorative, aria-hidden) ---------- */
 /* Ridge band: its own strip under the header row, so no decoration sits behind text (see shell/Ridge.tsx).
    Moving things use transform/opacity only; base transforms are the reduced-motion still frame. */
-.ridge{position:relative; height:var(--band-h); overflow:hidden; pointer-events:none}
+.ridge{grid-area:ridge; align-self:stretch; position:relative; min-width:0; margin:0 -16px; overflow:hidden; pointer-events:none}
+@media (min-width:1024px){
+  :root{--row-h:72px; --band-h:0px}
+  .bar-row{grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:"id ridge add"; grid-template-rows:var(--row-h); column-gap:20px}
+  .bar .ridge{margin:0; -webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent); mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
+}
 .ridge svg{position:absolute; inset:0; width:100%; height:100%; display:block}
 .tl-far-a{stop-color:var(--ridge-far); stop-opacity:.95}
 .tl-far-b{stop-color:var(--ridge-far); stop-opacity:.35}

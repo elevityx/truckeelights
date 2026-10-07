@@ -7,7 +7,7 @@ interface Props {
   onAdd(): void;
 }
 
-/** Quiet bar: wordmark + region/season line and Add a house, then the Donner ridge band, then the season trim. */
+/** Quiet bar: wordmark + region/season line, the Donner ridge scene, and Add a house. The scene sits between them on wide screens and in a short band below them on narrow ones. */
 export default function Header({ ctx, onAdd }: Props) {
   const i = ctx.wordmark.lastIndexOf(' ');
   const first = i < 0 ? ctx.wordmark : ctx.wordmark.slice(0, i);
@@ -36,6 +36,7 @@ export default function Header({ ctx, onAdd }: Props) {
               <span>{label}</span>
             </p>
           </div>
+          <Ridge season={ctx.season} />
           {ctx.submissionsOpen && (
             <button type="button" className="btn primary add" aria-label="Add a house to the map" onClick={onAdd}>
               <PlusIcon />
@@ -44,7 +45,6 @@ export default function Header({ ctx, onAdd }: Props) {
             </button>
           )}
         </div>
-        <Ridge season={ctx.season} />
         {ctx.season === 'halloween' ? (
           <div className="drip" aria-hidden="true">
             <i style={{ left: '13%', animationDelay: '-1s' }} />
