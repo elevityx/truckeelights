@@ -1,6 +1,15 @@
 'use client';
 
-import type { RegionContext } from '@/lib/data/types';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import Sheet from '@/components/ui/Sheet';
+import { XIcon } from '@/components/shell/Icons';
+import { mapsConfigured } from '@/config/public-env';
+import { DataError, toDataError, userMessage, type RegionContext } from '@/lib/data';
+import { ensureAnonymousSession, hasSession, submitHouse } from '@/lib/data/submit';
+import { createAddressPicker, createPinConfirm } from '@/lib/maps/picker';
+import type { PickedPlace } from '@/lib/maps/types';
+import BotCheck from './BotCheck';
+import { BLOCKED_MESSAGE, initialState, reducer, type Step } from './flow';
 
 // Owner: WP-C
 export interface AddHouseSheetProps {
@@ -10,7 +19,248 @@ export interface AddHouseSheetProps {
   onOpenExisting(houseId: string): void;
 }
 
-export default function AddHouseSheet(props: AddHouseSheetProps) {
-  void props;
-  return null;
+const STEPS = ['Find address', 'Confirm pin', 'Bot check'] as const;
+
+function latlng(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting }: AddHouseSheetProps) {
+  const [s, dispatch] = useReducer(reducer, initialState);
+  const [token, setToken] = useState('');
+  const [session, setSession] = useState<boolean | null>(null);
+  const [placed, setPlaced] = useState(false); // pin dragged on the map
+  const { region, season } = ctx;
+  const seasonLabel = season === 'halloween' ? 'Halloween' : 'Christmas';
+
+  // Sheet re-runs its focus effect when onClose changes identity, so hand it a stable function.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+  const close = useCallback(() => closeRef.current(), []);
+
+  // Step 1: address picker
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (s.step !== 1 || s.result || !pickerRef.current) return;
+    return createAddressPicker(pickerRef.current, region, (place: PickedPlace) => {
+      setPlaced(false);
+      dispatch({ type: 'picked', place });
+    });
+  }, [s.step, s.result, region]);
+
+  // Step 2: pin-confirm map (Google only)
+  const miniRef = useRef<HTMLDivElement>(null);
+  const startRef = useRef({ lat: s.lat, lng: s.lng });
+  useEffect(() => {
+    if (s.step === 2 && s.place) startRef.current = { lat: s.place.lat, lng: s.place.lng };
+  }, [s.step, s.place]);
+  useEffect(() => {
+    if (s.step !== 2 || !s.place || !miniRef.current) return;
+    return createPinConfirm(miniRef.current, region, season, startRef.current, (lat, lng) => {
+      setPlaced(true);
+      dispatch({ type: 'moved', lat, lng });
+    });
+  }, [s.step, s.place, region, season]);
+
+  // Step 3: ask for a session only now (lazy), skip the bot check when one exists.
+  useEffect(() => {
+    if (s.step !== 3) return;
+    let live = true;
+    void hasSession().then((ok) => {
+      if (live) setSession(ok);
+    });
+    return () => {
+      live = false;
+    };
+  }, [s.step]);
+
+  const needToken = session === false;
+  const canSubmit = !s.busy && session !== null && (!needToken || token !== '');
+
+  const submit = async () => {
+    if (!canSubmit || !s.place) return;
+    dispatch({ type: 'submitStart' });
+    try {
+      if (!(await hasSession())) await ensureAnonymousSession(token);
+      const r = await submitHouse({
+        regionSlug: region.slug,
+        placeId: s.place.placeId,
+        address: s.address.trim(),
+        lat: s.lat,
+        lng: s.lng,
+      });
+      dispatch({ type: 'submitDone', result: r });
+    } catch (e) {
+      const err = toDataError(e);
+      if (err.code === 'captcha_failed') setToken('');
+      dispatch({ type: 'submitFail', code: err.code, message: userMessage(new DataError(err.code), region.name) });
+      void hasSession().then(setSession);
+    }
+  };
+
+  const res = s.result;
+
+  let body;
+  if (res?.kind === 'created') {
+    body = (
+      <div className="result">
+        <p className="disp">{season === 'halloween' ? 'It’s alive!' : 'Added!'}</p>
+        <p>
+          <strong>{res.address}</strong> is on the {seasonLabel} map.
+        </p>
+        <div className="actions">
+          <button type="button" className="btn primary" onClick={() => onCreated(res.houseId)}>
+            See it on the map
+          </button>
+        </div>
+      </div>
+    );
+  } else if (res?.kind === 'exists') {
+    body = (
+      <div className="result">
+        <p className="disp">Already on the map</p>
+        <p>
+          Someone added <strong>{res.address}</strong> this season.
+        </p>
+        <div className="actions">
+          <button type="button" className="btn primary" onClick={() => onOpenExisting(res.houseId)}>
+            Open that house
+          </button>
+        </div>
+      </div>
+    );
+  } else if (res?.kind === 'blocked') {
+    body = (
+      <div className="result">
+        <p>{BLOCKED_MESSAGE}</p>
+        <div className="actions">
+          <button type="button" className="btn ghost" onClick={close}>
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  } else if (s.step === 1) {
+    body = (
+      <>
+        <label className="lbl" htmlFor="add-q">
+          Street address in {region.name}
+        </label>
+        <div id="add-q" ref={pickerRef} aria-describedby="add-hint" />
+        <p className="err" role="alert">
+          {s.error}
+        </p>
+        <p className="fine" id="add-hint">
+          Suggestions only cover the {region.name} area.
+        </p>
+      </>
+    );
+  } else if (s.step === 2) {
+    body = (
+      <>
+        <p style={{ margin: 0 }}>
+          {mapsConfigured(season)
+            ? 'Drag the pin onto the house if it’s off. You can fix how the address reads, too.'
+            : 'You can fix how the address reads.'}
+        </p>
+        {mapsConfigured(season) && <div className="mini" ref={miniRef} />}
+        <p className="coords">
+          {latlng(s.lat, s.lng)} · {placed ? 'placed by you' : 'from the address'}
+        </p>
+        <label className="lbl" htmlFor="add-addr">
+          Address as it will show
+        </label>
+        <input
+          className="field"
+          id="add-addr"
+          type="text"
+          maxLength={160}
+          value={s.address}
+          onChange={(e) => dispatch({ type: 'setAddress', address: e.target.value })}
+        />
+        <p className="err" role="alert">
+          {s.error}
+        </p>
+        <div className="actions">
+          <button type="button" className="btn primary" onClick={() => dispatch({ type: 'confirm' })}>
+            Yes, that’s the house
+          </button>
+          <button type="button" className="btn ghost" onClick={() => dispatch({ type: 'goStep', step: 1 })}>
+            Back
+          </button>
+        </div>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        {needToken ? (
+          <>
+            <p style={{ margin: 0 }}>One quick check that you’re a person. We ask once per visit.</p>
+            <BotCheck onToken={setToken} onExpire={() => setToken('')} resetKey={s.captchaKey} />
+          </>
+        ) : (
+          <p style={{ margin: 0 }}>{session === null ? 'One moment…' : 'You’re already checked. Ready to add it.'}</p>
+        )}
+        <div className="summary">
+          <span className="fine">Adding</span>
+          <strong>{s.address.trim()}</strong>
+          <span className="fine" style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {latlng(s.lat, s.lng)}
+          </span>
+        </div>
+        <p className="err" role="alert">
+          {s.error}
+        </p>
+        <div className="actions">
+          <button type="button" className="btn primary" disabled={!canSubmit} onClick={() => void submit()}>
+            {s.busy ? 'Adding…' : 'Add to the map'}
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            disabled={s.busy}
+            onClick={() => dispatch({ type: 'goStep', step: 2 })}
+          >
+            Back
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <Sheet label="Add a house" onClose={close}>
+      <div className="sheet-in">
+        <div className="sheet-h">
+          <div>
+            <p className="eyebrow">{seasonLabel}</p>
+            <h2 className="disp">Add a house</h2>
+          </div>
+          <button type="button" className="iconbtn x" aria-label="Close add a house" onClick={close}>
+            <XIcon />
+          </button>
+        </div>
+        {!res && (
+          <ol className="steps" aria-label="Steps">
+            {STEPS.map((t, i) => (
+              <li key={t}>
+                <button
+                  type="button"
+                  aria-current={s.step === i + 1 ? 'step' : 'false'}
+                  onClick={() => dispatch({ type: 'goStep', step: (i + 1) as Step })}
+                >
+                  <b>Step {i + 1}</b>
+                  {t}
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+        <div className="sec">{body}</div>
+      </div>
+    </Sheet>
+  );
 }
