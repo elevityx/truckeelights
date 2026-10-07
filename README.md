@@ -7,10 +7,10 @@ A community map of the best holiday light displays in Truckee, CA. Halloween (Tr
 Prerequisites: Node (see `.nvmrc`), Docker, and the Supabase CLI.
 
 ```sh
-nvm use && npm ci && supabase start && supabase db reset && cp .env.example .env.local
+nvm use && npm ci && npm run db:start && supabase db reset && cp .env.example .env.local
 ```
 
-Paste the publishable key from `supabase status` into `.env.local`, then `npm run dev`.
+`npm run db:start` wraps `supabase start` with local-only auth defaults, so use it instead of calling `supabase start` directly. Paste the publishable key from `supabase status` into `.env.local`, then `npm run dev`.
 
 No Maps key? The List view still works.
 

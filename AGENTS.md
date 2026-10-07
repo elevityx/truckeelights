@@ -24,19 +24,22 @@ npm run build      # static export to out/
 npm run lint
 npm run typecheck
 npm test
-supabase start
+npm run db:start   # local Supabase stack (sets local-only auth env; don't run bare `supabase start`)
 supabase db reset
 npm run db:test
 npm run test:concurrency
 ```
-Local env: copy `.env.example` to `.env.local`.
+Local env: copy `.env.example` to `.env.local`. It holds the `NEXT_PUBLIC_*` values (Supabase URL and publishable key, Turnstile site key, optional Maps key and map ids, site URL), all public.
+The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_SECRET` through `supabase/config.toml`. `supabase/start-local.sh` (via `npm run db:start`) defaults them to `http://localhost:3000` and Cloudflare's public always-pass test secret. Never put a real captcha secret in the repo.
 
 ## Layout
 - `src/app` (pages), `src/components`
 - `src/lib/data` (the **only** Supabase caller)
-- `src/lib/maps` (adapter), `src/lib/theme`, `src/config/public-env.ts`
+- `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
+- `src/components/admin` (admin back office at `/admin/`)
 - `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
-- `tests/db-concurrency`
+- `tests/db-concurrency` (Node test runner, needs the local stack)
+- `.github/workflows/ci.yml`
 
 ## Invariants (do not break)
 1. There are no table write grants. Public writes go only through the exposed RPCs, and internal functions live in the `private` schema, which isn't exposed. Every table in every schema has RLS enabled.
@@ -48,7 +51,11 @@ Local env: copy `.env.example` to `.env.local`.
 7. Schema changes go through versioned migrations under `supabase/migrations/`. Don't make ad-hoc changes in the dashboard.
 8. A new function needs an explicit `grant execute` on its exact signature and an update to the ACL allowlist test (`supabase/tests/01_acl.test.sql`).
 9. `private` schema USAGE is **not** granted to API roles in R1. If a later release grants it for Storage policy helpers, the ACL test changes in the same PR.
-10. Private-table protection: FORCE RLS is the intended variant. If the database work ships the restrictive-policy variant instead, note it here.
+10. Private tables (`private.quota_events`, `private.blocked_terms`) have RLS enabled **and forced**, with no policies and no grants. The security-definer RPCs keep working because the owner role has BYPASSRLS. Do not switch to policies without updating the pgTAP tests.
+
+**CI** (`.github/workflows/ci.yml`): runs on PRs and pushes with no secrets and no `pull_request_target`, actions pinned by SHA. Job `web` runs lint, typecheck, tests, build, `npm audit --omit=dev --audit-level=high`, and a privacy grep. Job `db` starts the local stack with `npm run db:start`, then runs `supabase db reset`, pgTAP, and the concurrency tests.
+
+**Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch.
 
 **PR rule**: any PR that changes stack, commands, env vars, layout, schema/RLS/grants, CI, or deploy updates this file in the same PR.
 
