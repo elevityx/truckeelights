@@ -41,3 +41,10 @@ firebase-debug.log
 
 # Optional npm cache directory
 .npm
+# Release 1 additions
+.env*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+next-env.d.ts
+*.tsbuildinfo
