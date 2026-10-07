@@ -14,6 +14,11 @@ interface Props {
  */
 export default function Sheet({ label, onClose, children }: Props) {
   const ref = useRef<HTMLElement>(null);
+  // Keep the latest onClose without re-running the focus effect when a parent passes an inline closure.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     const heading = ref.current?.querySelector<HTMLElement>('h1,h2,h3');
@@ -22,11 +27,11 @@ export default function Sheet({ label, onClose, children }: Props) {
       heading.focus();
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <>
