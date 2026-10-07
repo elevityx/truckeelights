@@ -41,6 +41,10 @@ jobs:
   db:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SUPABASE_AUTH_SITE_URL: http://localhost:3000
+      # Cloudflare's public always-pass TEST secret: local/CI only, never a real secret
+      SUPABASE_AUTH_CAPTCHA_SECRET: 1x0000000000000000000000000000000AA
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,7 +53,7 @@ jobs:
         with:
           version: 2.109.1
       - name: Start local stack
-        run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,postgres-meta,inbucket
+        run: npm run db:start -- -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,postgres-meta,inbucket
       - run: supabase db reset
       - run: npm run db:test
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
