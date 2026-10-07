@@ -1,4 +1,5 @@
 import type { RegionContext } from '@/lib/data/types';
+import { Ridge } from '../map/Decor';
 import { PinIcon, PlusIcon } from './Icons';
 
 interface Props {
@@ -16,6 +17,7 @@ export default function Header({ ctx, view, onView, onAdd }: Props) {
   return (
     <>
       <header className="bar">
+        <Ridge season={ctx.season} />
         <h1 className="wm disp" aria-label={ctx.wordmark}>
           {first}
           {last && (
