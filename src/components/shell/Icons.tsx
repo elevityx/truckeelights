@@ -40,3 +40,13 @@ export const WarnIcon = () => (
     <path d="M12 10v5M12 18v.5" />
   </Svg>
 );
+export const MapIcon = () => (
+  <Svg w={2}>
+    <path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" />
+  </Svg>
+);
+export const ListIcon = () => (
+  <Svg>
+    <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />
+  </Svg>
+);

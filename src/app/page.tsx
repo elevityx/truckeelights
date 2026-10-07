@@ -7,6 +7,7 @@ import ListView from '@/components/list/ListView';
 import LoreBar from '@/components/lore/LoreBar';
 import MapView from '@/components/map/MapView';
 import Header from '@/components/shell/Header';
+import { ListIcon, MapIcon } from '@/components/shell/Icons';
 import Toast from '@/components/shell/Toast';
 import { supabaseConfigured } from '@/config/public-env';
 import {
@@ -123,7 +124,7 @@ export default function HomePage() {
 
   return (
     <>
-      <Header ctx={ctx} view={view} onView={setView} onAdd={() => setSheet('add')} />
+      <Header ctx={ctx} onAdd={() => setSheet('add')} />
       <div className="pbody">
         <div className="views">
           {view === 'map' ? (
@@ -131,6 +132,16 @@ export default function HomePage() {
           ) : (
             <ListView season={ctx.season} year={ctx.year} pins={pins} onOpen={select} />
           )}
+          <div className="seg viewtoggle" role="group" aria-label="Show houses as">
+            <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>
+              <MapIcon />
+              Map
+            </button>
+            <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>
+              <ListIcon />
+              List
+            </button>
+          </div>
         </div>
       </div>
       <LoreBar season={ctx.season} />

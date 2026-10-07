@@ -1,15 +1,14 @@
 import type { RegionContext } from '@/lib/data/types';
-import { Ridge } from '../map/Decor';
 import { PinIcon, PlusIcon } from './Icons';
+import { Ridge } from './Ridge';
 
 interface Props {
   ctx: RegionContext;
-  view: 'map' | 'list';
-  onView(v: 'map' | 'list'): void;
   onAdd(): void;
 }
 
-export default function Header({ ctx, view, onView, onAdd }: Props) {
+/** Quiet bar: wordmark + region/season line, the Donner ridge scene, and Add a house. The scene sits between them on wide screens and in a short band below them on narrow ones. */
+export default function Header({ ctx, onAdd }: Props) {
   const i = ctx.wordmark.lastIndexOf(' ');
   const first = i < 0 ? ctx.wordmark : ctx.wordmark.slice(0, i);
   const last = i < 0 ? '' : ctx.wordmark.slice(i + 1);
@@ -17,36 +16,32 @@ export default function Header({ ctx, view, onView, onAdd }: Props) {
   return (
     <>
       <header className="bar">
-        <Ridge season={ctx.season} />
-        <h1 className="wm disp" aria-label={ctx.wordmark}>
-          {first}
-          {last && (
-            <>
-              {' '}
-              <span className="w2">{last}</span>
-            </>
-          )}
-        </h1>
-        <div className="meta">
-          <span className="chip" title="Region">
-            <PinIcon />
-            {ctx.region.name}
-          </span>
-          <span className="season-lbl">{label}</span>
-        </div>
-        <div className="bar-actions">
-          <div className="seg" role="group" aria-label="Show houses as">
-            <button type="button" aria-pressed={view === 'map'} onClick={() => onView('map')}>
-              Map
-            </button>
-            <button type="button" aria-pressed={view === 'list'} onClick={() => onView('list')}>
-              List
-            </button>
+        <div className="bar-row">
+          <div className="bar-id">
+            <h1 className="wm disp" aria-label={ctx.wordmark}>
+              {first}
+              {last && (
+                <>
+                  {' '}
+                  <span className="w2">{last}</span>
+                </>
+              )}
+            </h1>
+            <p className="sub">
+              <PinIcon />
+              <span>{ctx.region.name}</span>
+              <span className="dot" aria-hidden="true">
+                ·
+              </span>
+              <span>{label}</span>
+            </p>
           </div>
+          <Ridge season={ctx.season} />
           {ctx.submissionsOpen && (
-            <button type="button" className="btn primary" aria-label="Add a house to the map" onClick={onAdd}>
+            <button type="button" className="btn primary add" aria-label="Add a house to the map" onClick={onAdd}>
               <PlusIcon />
-              Add a house
+              <span className="add-long">Add a house</span>
+              <span className="add-short">Add</span>
             </button>
           )}
         </div>
