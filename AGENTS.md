@@ -5,34 +5,52 @@ Rules for any AI agent (Claude Code, Codex, Cursor, Antigravity) working in this
 ## What this is
 truckeelights.com is a community map of decorated houses in Truckee, CA. It has two seasonal modes, **Christmas** (lights) and **Halloween**. Visitors add houses and photos. An admin back office picks the active season/theme and moderates photos.
 
-## Status (2026-10-07): mid-migration
-- **Current `main`** (legacy, Dec 2024): Next.js 15 Pages Router static export, Firebase (Firestore + Storage), and Google Maps, Christmas only.
-- **In progress on `feat/seasonal-revival`**: move to Supabase, add the seasonal model and back office, upgrade dependencies, and redesign. Until that lands, treat the Firebase code as legacy and add no new Firebase usage.
+## Status (2026-10)
+The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cutover. There is no Firebase code. Photos arrive in a later release.
 
 ## Stack
-- Next.js static export (`output: 'export'`). There is no server runtime, so all data access is client-side through Supabase, and security comes **only** from Postgres RLS and constraints.
-- Supabase: Postgres, Auth (an admin login, plus anonymous or bot-checked public writes), and Storage (photos).
-- Google Maps JS API (key is referrer-restricted).
-- Tailwind CSS.
-- Hosting: Cloudflare Pages. DNS for truckeelights.com is on Cloudflare.
+- Next.js 16 App Router, static export (`output: 'export'`, `trailingSlash: true`). Every page is a client component and data loads in effects only, because the build prerenders with empty env. There is no server runtime, so security comes **only** from Postgres RLS and constraints.
+- TypeScript, Tailwind 4 (tokens per `[data-theme]` in `globals.css`).
+- Supabase: Postgres + Auth (anonymous sessions gated by Turnstile; admin password + TOTP MFA).
+- Google Maps JS (`@googlemaps/js-api-loader` 2, Advanced Markers, `PlaceAutocompleteElement`) behind `src/lib/maps`, with a keyless stub.
+- Cloudflare Pages: `main` = production, branches = previews. DNS for truckeelights.com is on Cloudflare.
 
 ## Commands
 ```bash
 nvm use            # Node version from .nvmrc
-npm install
-npm run dev        # local dev
+npm ci
+npm run dev
 npm run build      # static export to out/
+npm run lint
+npm run typecheck
+npm test
+supabase start
+supabase db reset
+npm run db:test
+npm run test:concurrency
 ```
-Test, lint, and Supabase commands are added here as the revival lands.
+Local env: copy `.env.example` to `.env.local`.
+
+## Layout
+- `src/app` (pages), `src/components`
+- `src/lib/data` (the **only** Supabase caller)
+- `src/lib/maps` (adapter), `src/lib/theme`, `src/config/public-env.ts`
+- `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
+- `tests/db-concurrency`
 
 ## Invariants (do not break)
-1. **The database enforces security, not the UI.** Every table has RLS enabled. The public role may only *create* rows, and only after validation. There is no public update or delete. Admin rights are checked inside RLS, never just in the client.
-2. **Seasons**: every pin belongs to exactly one `(season, year)`. The public map shows only the active season, which is a single row in site settings that only admins can change. Pins from past seasons are hidden, never deleted.
-3. **Photos stay hidden until an admin approves them.** The public UI never lists storage directly. It reads approved photo rows only.
-4. **Deduplication happens in the database**, through a unique constraint, never only through a client-side check.
-5. **Secrets**: only public values (the Supabase URL, the anon/publishable key, the referrer-restricted Maps key) may appear in client code or `NEXT_PUBLIC_*`. Never commit a service-role key, a database password, or `.env*` files.
+1. There are no table write grants. Public writes go only through the exposed RPCs, and internal functions live in the `private` schema, which isn't exposed. Every table in every schema has RLS enabled.
+2. Each region has one `site_settings` row, and the public sees only its active `(season, year)`. Pins from past seasons are hidden, never deleted.
+3. Photos stay hidden until an admin approves them. The public UI never lists storage directly.
+4. Deduplication happens in the database, through unique keys per `(region, season, year)`, never only in the client.
+5. **Secrets**: only public values (the Supabase URL, the publishable key, the referrer-restricted Maps key) may appear in client code or `NEXT_PUBLIC_*`. Never commit a service-role key, a database password, or real `.env*` files. A sanitized `.env.example` with local-stack values only is allowed. Hosted values live in the host's env settings, never in the repo.
 6. **No HTML strings built from data.** Render through React or `textContent`, never `innerHTML`.
 7. Schema changes go through versioned migrations under `supabase/migrations/`. Don't make ad-hoc changes in the dashboard.
+8. A new function needs an explicit `grant execute` on its exact signature and an update to the ACL allowlist test (`supabase/tests/01_acl.test.sql`).
+9. `private` schema USAGE is **not** granted to API roles in R1. If a later release grants it for Storage policy helpers, the ACL test changes in the same PR.
+10. Private-table protection: FORCE RLS is the intended variant. If the database work ships the restrictive-policy variant instead, note it here.
+
+**PR rule**: any PR that changes stack, commands, env vars, layout, schema/RLS/grants, CI, or deploy updates this file in the same PR.
 
 ## Workflow
 This is a public, open-source repo, and outside contributors (and their agents) are welcome.
