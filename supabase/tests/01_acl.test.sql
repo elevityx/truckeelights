@@ -1,0 +1,195 @@
+-- AC1, AC2, AC3: RLS everywhere, no write grants, column allowlist, private schema unreachable,
+-- exact EXECUTE allowlist per API role.
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(42);
+
+-- (1) RLS enabled on every table in public and private.
+select is(
+  (select coalesce(array_agg(format('%I.%I', n.nspname, c.relname) order by format('%I.%I', n.nspname, c.relname)), '{}')
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p') and not c.relrowsecurity),
+  '{}'::text[], 'every table in public and private has RLS enabled');
+select is(
+  (select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')),
+  8, 'exactly 8 tables exist in public + private (R1 schema; no photos/storage_jobs)');
+select is(
+  (select coalesce(array_agg(c.relname::text order by c.relname::text), '{}')
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'private' and c.relkind in ('r', 'p') and not c.relforcerowsecurity),
+  '{}'::text[], 'private tables use FORCE ROW LEVEL SECURITY');
+select is(
+  (select count(*)::int from pg_policies where schemaname = 'private'),
+  0, 'private tables have no policies');
+select is(
+  (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'admins'),
+  0, 'public.admins has no policies');
+
+-- (2) No write privileges (or other table-level privileges) for API roles on any table.
+select is(
+  (select coalesce(array_agg(format('%s:%I.%I:%s', r.role, n.nspname, c.relname, p.priv) order by format('%s:%I.%I:%s', r.role, n.nspname, c.relname, p.priv)), '{}')
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     cross join (values ('anon'), ('authenticated')) r(role)
+     cross join (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) p(priv)
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
+      and has_table_privilege(r.role, c.oid, p.priv)),
+  '{}'::text[], 'anon/authenticated have no INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on any table');
+select is(
+  (select coalesce(array_agg(format('%s:%I.%I.%I:%s', r.role, n.nspname, c.relname, a.attname, p.priv) order by format('%s:%I.%I.%I:%s', r.role, n.nspname, c.relname, a.attname, p.priv)), '{}')
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+     cross join (values ('anon'), ('authenticated')) r(role)
+     cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(priv)
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
+      and has_column_privilege(r.role, c.oid, a.attnum, p.priv)),
+  '{}'::text[], 'anon/authenticated have no column-level INSERT/UPDATE/REFERENCES anywhere');
+select is(
+  (select coalesce(array_agg(format('%s:%I.%I', r.role, n.nspname, c.relname) order by format('%s:%I.%I', r.role, n.nspname, c.relname)), '{}')
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     cross join (values ('anon'), ('authenticated')) r(role)
+    where n.nspname in ('public', 'private') and c.relkind = 'S'
+      and (has_sequence_privilege(r.role, c.oid, 'USAGE') or has_sequence_privilege(r.role, c.oid, 'UPDATE')
+           or has_sequence_privilege(r.role, c.oid, 'SELECT'))),
+  '{}'::text[], 'anon/authenticated have no sequence privileges in public/private');
+
+-- (3) No SELECT at all on admins and the private tables.
+select ok(not has_any_column_privilege('anon', 'public.admins', 'SELECT'), 'anon cannot SELECT public.admins');
+select ok(not has_any_column_privilege('authenticated', 'public.admins', 'SELECT'), 'authenticated cannot SELECT public.admins');
+select ok(not has_any_column_privilege('anon', 'private.quota_events', 'SELECT'), 'anon cannot SELECT private.quota_events');
+select ok(not has_any_column_privilege('authenticated', 'private.quota_events', 'SELECT'), 'authenticated cannot SELECT private.quota_events');
+select ok(not has_any_column_privilege('anon', 'private.blocked_terms', 'SELECT'), 'anon cannot SELECT private.blocked_terms');
+select ok(not has_any_column_privilege('authenticated', 'private.blocked_terms', 'SELECT'), 'authenticated cannot SELECT private.blocked_terms');
+
+-- (4) Omitted columns are unreadable; the readable set equals the grant list exactly.
+select is(
+  (select coalesce(array_agg(format('%s:%s', r.role, x.col) order by format('%s:%s', r.role, x.col)), '{}')
+     from (values ('anon'), ('authenticated')) r(role)
+     cross join (values
+       ('houses', 'place_id'), ('houses', 'normalized_address'), ('houses', 'coord_source'),
+       ('houses', 'hidden_reason'), ('houses', 'moderated_by'), ('houses', 'moderated_at'),
+       ('houses', 'released_at'), ('houses', 'created_by'), ('houses', 'created_at'),
+       ('houses', 'legacy_source'), ('houses', 'legacy_id'), ('site_settings', 'updated_by'),
+       ('regions', 'boundary'), ('regions', 'created_at')) x(tbl, col)
+    where has_column_privilege(r.role, format('public.%I', x.tbl), x.col, 'SELECT')),
+  '{}'::text[], 'omitted columns are unreadable by anon and authenticated');
+select is(
+  (select array_agg(format('%I.%I', c.relname, a.attname) order by c.relname, a.attname)
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
+      and has_column_privilege('anon', c.oid, a.attnum, 'SELECT')),
+  array['app_settings.default_region_id', 'app_settings.id',
+        'houses.address', 'houses.id', 'houses.lat', 'houses.lng', 'houses.region_id', 'houses.season',
+        'houses.status', 'houses.year',
+        'region_brands.region_id', 'region_brands.season', 'region_brands.wordmark',
+        'regions.center_lat', 'regions.center_lng', 'regions.country_code', 'regions.default_zoom',
+        'regions.id', 'regions.is_active', 'regions.max_lat', 'regions.max_lng', 'regions.min_lat',
+        'regions.min_lng', 'regions.name', 'regions.slug', 'regions.timezone',
+        'site_settings.active_season', 'site_settings.active_year', 'site_settings.region_id',
+        'site_settings.submissions_open', 'site_settings.updated_at'],
+  'anon readable columns equal the grant allowlist exactly');
+select is(
+  (select array_agg(format('%I.%I', c.relname, a.attname) order by c.relname, a.attname)
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
+      and has_column_privilege('authenticated', c.oid, a.attnum, 'SELECT')),
+  (select array_agg(format('%I.%I', c.relname, a.attname) order by c.relname, a.attname)
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+    where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
+      and has_column_privilege('anon', c.oid, a.attnum, 'SELECT')),
+  'authenticated readable columns equal anon readable columns');
+
+-- (5) No USAGE (or CREATE) on the private schema.
+select ok(not has_schema_privilege('anon', 'private', 'USAGE'), 'anon has no USAGE on schema private');
+select ok(not has_schema_privilege('authenticated', 'private', 'USAGE'), 'authenticated has no USAGE on schema private');
+select ok(not has_schema_privilege('anon', 'private', 'CREATE')
+          and not has_schema_privilege('authenticated', 'private', 'CREATE'), 'no CREATE on schema private');
+select ok(not has_schema_privilege('anon', 'public', 'CREATE')
+          and not has_schema_privilege('authenticated', 'public', 'CREATE'), 'no CREATE on schema public');
+
+-- (6) Direct access to private tables and admins fails with 42501.
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+select throws_ok('select * from private.quota_events', '42501', null, 'anon: select private.quota_events -> 42501');
+select throws_ok($$insert into private.quota_events (kind, uid, region_id) values ('house', gen_random_uuid(), gen_random_uuid())$$,
+                 '42501', null, 'anon: insert private.quota_events -> 42501');
+select throws_ok('select * from private.blocked_terms', '42501', null, 'anon: select private.blocked_terms -> 42501');
+select throws_ok($$insert into private.blocked_terms (term) values ('zzanon')$$, '42501', null, 'anon: insert private.blocked_terms -> 42501');
+select throws_ok('select * from public.admins', '42501', null, 'anon: select public.admins -> 42501');
+reset role;
+
+select set_config('request.jwt.claims',
+  json_build_object('sub', 'a1000000-0000-4000-a000-000000000001', 'role', 'authenticated',
+                    'is_anonymous', false, 'aal', 'aal2')::text, true);
+set local role authenticated;
+select throws_ok('select * from private.quota_events', '42501', null, 'authenticated: select private.quota_events -> 42501');
+select throws_ok($$insert into private.quota_events (kind, uid, region_id) values ('house', gen_random_uuid(), gen_random_uuid())$$,
+                 '42501', null, 'authenticated: insert private.quota_events -> 42501');
+select throws_ok('select * from private.blocked_terms', '42501', null, 'authenticated: select private.blocked_terms -> 42501');
+select throws_ok($$insert into private.blocked_terms (term) values ('zzauth')$$, '42501', null, 'authenticated: insert private.blocked_terms -> 42501');
+select throws_ok('select * from public.admins', '42501', null, 'authenticated: select public.admins -> 42501');
+select throws_ok('select private.is_admin(null)', '42501', null, 'authenticated: calling a private function -> 42501');
+
+-- (9) Direct writes on houses fail with 42501.
+select throws_ok($$insert into public.houses (region_id, season, year, address, normalized_address, lat, lng, coord_source)
+                   select id, 'halloween', 2026, '1 Direct Rd', '1 direct rd', 39.3, -120.2, 'admin' from public.regions limit 1$$,
+                 '42501', null, 'authenticated: direct insert into houses -> 42501');
+select throws_ok($$update public.houses set status = 'hidden'$$, '42501', null, 'authenticated: direct update of houses -> 42501');
+select throws_ok($$delete from public.houses$$, '42501', null, 'authenticated: direct delete from houses -> 42501');
+select throws_ok($$select * from public.houses$$, '42501', null, 'authenticated: select * on houses -> 42501 (column grants)');
+reset role;
+
+-- (7) Exact EXECUTE allowlist per role in schema public.
+select is(
+  (select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')),
+  array['public.get_region_context(text)'],
+  'anon can execute exactly the allowlist');
+select is(
+  (select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
+  array['public.admin_list_houses(uuid, text, text)',
+        'public.admin_release_house(uuid)',
+        'public.admin_set_house_status(uuid, text, text)',
+        'public.admin_set_season(uuid, text, integer, boolean)',
+        'public.admin_whoami(uuid)',
+        'public.get_region_context(text)',
+        'public.submit_house(text, text, text, double precision, double precision)'],
+  'authenticated can execute exactly the allowlist');
+
+-- (8) Nothing in private is executable by API roles.
+select is(
+  (select coalesce(array_agg(format('%s:%I.%I(%s)', r.role, n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%s:%I.%I(%s)', r.role, n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     cross join (values ('anon'), ('authenticated')) r(role)
+    where n.nspname = 'private' and has_function_privilege(r.role, p.oid, 'EXECUTE')),
+  '{}'::text[], 'no private function is executable by anon or authenticated');
+
+-- Every function in public and private pins search_path to empty, and only the intended ones are definers.
+select is(
+  (select coalesce(array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname)), '{}')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'private')
+      and not coalesce(p.proconfig @> array['search_path=""'], false)),
+  '{}'::text[], 'every public/private function sets search_path = ''''');
+select is(
+  (select array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname))
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'private') and p.prosecdef),
+  array['private.is_admin', 'private.lock_quota', 'private.take_quota',
+        'public.admin_list_houses', 'public.admin_release_house', 'public.admin_set_house_status',
+        'public.admin_set_season', 'public.admin_whoami', 'public.submit_house'],
+  'security definer functions are exactly the intended set');
+select is(
+  (select coalesce(array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname)), '{}')
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'private') and p.prosecdef and pg_get_userbyid(p.proowner) <> 'postgres'),
+  '{}'::text[], 'all security definer functions are owned by postgres');
+
+select * from finish();
+rollback;
