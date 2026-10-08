@@ -1,0 +1,71 @@
+/* Photos (WP-B): strip, lightbox, add-photos sheet. Base .strip/.lb/.previews/.prog/.filepick rules are in globals.css
+   (ported from the Seasonal v2 mockup); these extend them. Colors come only from the [data-theme] tokens. */
+
+/* ---------- Strip ---------- */
+.strip{list-style:none; margin:0; padding:0}
+.strip li{min-width:0}
+.strip button{position:relative; display:block; width:100%; border:2px solid transparent; transition:border-color .15s, transform .15s}
+.strip button:hover{border-color:var(--accent)}
+.strip button:active{transform:scale(.98)}
+.strip button:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
+.strip .more{position:absolute; inset:0; display:grid; place-items:center; background:var(--scrim); color:#fff; font-weight:700; font-size:20px; font-variant-numeric:tabular-nums}
+.strip-skel span{display:block; aspect-ratio:4/3; border-radius:10px; background:linear-gradient(100deg, var(--surface-2) 30%, var(--line) 50%, var(--surface-2) 70%); background-size:300% 100%; animation:ph-skel 1.4s ease-in-out infinite}
+@keyframes ph-skel{from{background-position:100% 0}to{background-position:0 0}}
+
+/* ---------- Lightbox: above the sheet (z-50), full viewport ---------- */
+.lb{position:fixed; z-index:70; padding:max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); animation:ph-fade .16s ease-out}
+.lb-stage{flex:1; min-height:0; width:100%; display:grid; place-items:center; touch-action:pan-y; user-select:none; -webkit-user-select:none}
+.lb img{max-width:min(100%, 1600px); max-height:calc(100dvh - 150px); object-fit:contain; box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 24px 70px rgba(0,0,0,.7); animation:ph-fade .2s ease-out}
+.lb .lbc{z-index:1; top:max(12px, env(safe-area-inset-top))}
+.lb .nav{gap:18px; font-weight:700; font-size:15px}
+.lb .nav span{min-width:5ch; text-align:center}
+.lb .nav .iconbtn{border-color:rgba(255,255,255,.2)}
+.lb-broken{margin:0; color:#F3ECDA; text-align:center; max-width:30ch}
+@keyframes ph-fade{from{opacity:0}to{opacity:1}}
+
+/* ---------- Add photos sheet ---------- */
+.ph-intro{margin:0}
+.dropzone{position:relative; display:flex; flex-direction:column; align-items:center; gap:10px; padding:22px 16px 18px; border:2px dashed var(--line); border-radius:var(--radius, 14px);
+  background:var(--bg); text-align:center; cursor:pointer; transition:border-color .15s}
+.dropzone:hover{border-color:var(--accent-2)}
+.dropzone:focus-within{outline:3px solid var(--focus); outline-offset:2px}
+.dropzone input{position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer}
+.dz-icon{width:52px; height:52px; border-radius:50%; display:grid; place-items:center; background:var(--surface-2); color:var(--accent); box-shadow:0 0 18px color-mix(in srgb, var(--pin-glow) 35%, transparent)}
+.dz-icon svg{width:26px; height:26px}
+
+.previews{list-style:none; padding:0}
+.previews li{min-width:0}
+.previews .pv{position:relative}
+.previews .pv img{transition:opacity .2s, filter .2s}
+.previews .cap{margin:4px 0 0; font-size:12.5px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+/* 44px hit area with a smaller visible disc */
+.previews .rm{top:0; right:0; width:44px; height:44px; background:none}
+.previews .rm::before{content:""; position:absolute; inset:8px; border-radius:50%; background:var(--scrim); border:1px solid rgba(255,255,255,.35)}
+.previews .rm svg{position:relative}
+.previews .rm:focus-visible{outline:3px solid var(--focus); outline-offset:-4px; border-radius:50%}
+.previews [data-stage="waiting"] img{opacity:.45}
+.previews [data-stage="resizing"] img,.previews [data-stage="uploading"] img{filter:saturate(.6) brightness(.8)}
+.previews [data-stage="failed"] img{opacity:.4; filter:grayscale(1)}
+.previews [data-stage="done"] .cap{color:var(--ok); font-weight:700}
+.previews [data-stage="failed"] .cap{color:var(--danger); font-weight:700}
+.pv-badge{position:absolute; left:50%; top:50%; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%; display:grid; place-items:center}
+[data-stage="resizing"] .pv-badge,[data-stage="uploading"] .pv-badge{border:3px solid var(--accent); border-right-color:transparent; animation:spin .8s linear infinite}
+[data-stage="done"] .pv-badge{background:var(--ok)}
+[data-stage="done"] .pv-badge::after{content:""; width:12px; height:7px; border:3px solid var(--bg); border-top:0; border-right:0; transform:translateY(-2px) rotate(-45deg)}
+[data-stage="failed"] .pv-badge{background:var(--danger)}
+[data-stage="failed"] .pv-badge::after{content:"!"; color:var(--bg); font-weight:800; font-size:18px; line-height:1}
+
+.prog{height:14px; border-radius:7px}
+.prog i{background:linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--accent-2))); transition:width .3s ease-out; box-shadow:0 0 12px color-mix(in srgb, var(--accent) 60%, transparent)}
+
+.ph-result{padding-top:4px}
+.ph-hero{width:84px; height:84px; display:block; filter:drop-shadow(0 0 16px var(--pin-glow)); animation:ph-bob 2.4s ease-in-out infinite alternate}
+.ph-hero svg{width:100%; height:100%; display:block}
+@keyframes ph-bob{from{transform:translateY(0) rotate(-3deg)}to{transform:translateY(-8px) rotate(3deg)}}
+.ph-lead{font-weight:700; font-size:17px; max-width:32ch}
+.ph-result .actions{justify-content:center}
+
+@media (prefers-reduced-motion:reduce){
+  .strip-skel span,.ph-hero,.lb,.lb img{animation:none}
+  [data-stage="resizing"] .pv-badge,[data-stage="uploading"] .pv-badge{animation-duration:2.4s}
+}

@@ -57,7 +57,7 @@ export default function HouseSheet({ pin, season, year, onClose, onToast, onAddP
           </ul>
         </div>
         <div className="sec">
-          <PhotoStrip houseId={pin.id} refreshKey={photosRefreshKey ?? 0} />
+          <PhotoStrip houseId={pin.id} refreshKey={photosRefreshKey ?? 0} address={firstSegment(pin.address)} />
         </div>
         <div className="sec">
           <div className="actions">
