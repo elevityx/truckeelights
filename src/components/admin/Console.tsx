@@ -7,6 +7,7 @@ import {
   adminReleaseHouse,
   adminSetHouseStatus,
   listMapHouses,
+  runStorageJobsFallback,
   toDataError,
   userMessage,
   type AdminHouse,
@@ -114,6 +115,7 @@ function HousesPanel({ ctx, onForbidden, onChanged }: { ctx: RegionContext; onFo
     setErr('');
     try {
       await fn();
+      await runStorageJobsFallback(ctx.region.id).catch(() => undefined); // A.3: run cleanup now; the banner covers failures
       setHiding(null);
       setReleasing(null);
       await load();
