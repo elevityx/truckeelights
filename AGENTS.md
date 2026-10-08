@@ -61,7 +61,7 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 9. `private` schema USAGE is **not** granted to API roles in R1. If a later release grants it for Storage policy helpers, the ACL test changes in the same PR.
 10. Private tables (`private.quota_events`, `private.blocked_terms`) have RLS enabled **and forced**, with no policies and no grants. The security-definer RPCs keep working because the owner role has BYPASSRLS. Do not switch to policies without updating the pgTAP tests.
 
-**CI** (`.github/workflows/ci.yml`): runs on PRs and pushes with no secrets and no `pull_request_target`, actions pinned by SHA. Job `web` runs lint, typecheck, tests, build, `npm audit --omit=dev --audit-level=high`, and a privacy grep. Job `db` starts the local stack with `npm run db:start`, then runs `supabase db reset`, pgTAP, and the concurrency tests.
+**CI** (`.github/workflows/ci.yml`): runs on PRs and pushes with no secrets and no `pull_request_target`, actions pinned by SHA. Job `web` runs lint, typecheck, tests, build, `npm audit --omit=dev --audit-level=high`, and a privacy grep. Job `db` starts the local stack with `npm run db:start`, then runs `npm run db:reset` (reset plus the local runner setup), pgTAP, `npm run test:concurrency`, and `npm run test:storage` (serialized; never in parallel with the concurrency tests).
 
 **Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch.
 
