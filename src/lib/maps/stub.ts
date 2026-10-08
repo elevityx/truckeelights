@@ -19,6 +19,14 @@ export function createStubAdapter(): MapAdapter {
     onPinSelect() {
       return () => {};
     },
+    onMapClick() {
+      return () => {}; // no map, so tap-to-add is off; Add a house still works
+    },
+    showProbe() {},
+    zoomTo() {},
+    async reverseGeocode() {
+      return [];
+    },
     destroy() {
       panel?.remove();
       panel = null;

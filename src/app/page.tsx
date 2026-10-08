@@ -19,6 +19,7 @@ import {
   type PinView,
   type RegionContext,
 } from '@/lib/data';
+import type { PickedPlace } from '@/lib/maps/types';
 import { applySeason } from '@/lib/theme/applySeason';
 
 export default function HomePage() {
@@ -27,6 +28,7 @@ export default function HomePage() {
   const [view, setView] = useState<'map' | 'list'>('map');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'house' | 'add' | null>(null);
+  const [addAt, setAddAt] = useState<{ place: PickedPlace; n: number } | null>(null); // map tap -> Add sheet at the pin step
   const [error, setError] = useState<DataError | 'unconfigured' | null>(null);
   const [toast, setToast] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,11 +126,30 @@ export default function HomePage() {
 
   return (
     <>
-      <Header ctx={ctx} onAdd={() => setSheet('add')} />
+      <Header
+        ctx={ctx}
+        onAdd={() => {
+          setAddAt(null);
+          setSheet('add');
+        }}
+      />
       <div className="pbody">
         <div className="views">
           {view === 'map' ? (
-            <MapView season={ctx.season} region={ctx.region} pins={pins} selectedId={selectedId} onSelect={select} />
+            <MapView
+              season={ctx.season}
+              region={ctx.region}
+              pins={pins}
+              selectedId={selectedId}
+              onSelect={select}
+              pickEnabled={ctx.submissionsOpen}
+              onAddAt={(place) => {
+                setAddAt((prev) => ({ place, n: (prev?.n ?? 0) + 1 }));
+                setSelectedId(null);
+                setUrlHouse(null);
+                setSheet('add');
+              }}
+            />
           ) : (
             <ListView season={ctx.season} year={ctx.year} pins={pins} onOpen={select} />
           )}
@@ -151,7 +172,9 @@ export default function HomePage() {
       )}
       {sheet === 'add' && (
         <AddHouseSheet
+          key={addAt ? `at-${addAt.n}` : 'search'}
           ctx={ctx}
+          initialPlace={addAt?.place}
           onClose={() => setSheet(null)}
           onCreated={(id) => void reload(id)}
           onOpenExisting={(id) => select(id)}

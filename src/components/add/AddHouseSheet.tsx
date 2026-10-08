@@ -17,6 +17,8 @@ export interface AddHouseSheetProps {
   onClose(): void;
   onCreated(houseId: string): void;
   onOpenExisting(houseId: string): void;
+  /** From a map tap: start at the pin step with this place. */
+  initialPlace?: PickedPlace;
 }
 
 const STEPS = ['Find address', 'Confirm pin', 'Bot check'] as const;
@@ -25,8 +27,8 @@ function latlng(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting }: AddHouseSheetProps) {
-  const [s, dispatch] = useReducer(reducer, initialState);
+export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, initialPlace }: AddHouseSheetProps) {
+  const [s, dispatch] = useReducer(reducer, initialPlace, (p) => (p ? reducer(initialState, { type: 'picked', place: p }) : initialState));
   const [token, setToken] = useState('');
   const [session, setSession] = useState<boolean | null>(null);
   const [placed, setPlaced] = useState(false); // pin dragged on the map
@@ -44,10 +46,15 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting 
   const pickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (s.step !== 1 || s.result || !pickerRef.current) return;
-    return createAddressPicker(pickerRef.current, region, (place: PickedPlace) => {
-      setPlaced(false);
-      dispatch({ type: 'picked', place });
-    });
+    return createAddressPicker(
+      pickerRef.current,
+      region,
+      (place: PickedPlace) => {
+        setPlaced(false);
+        dispatch({ type: 'picked', place });
+      },
+      { focus: true },
+    );
   }, [s.step, s.result, region]);
 
   // Step 2: pin-confirm map (Google only)
@@ -167,7 +174,7 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting 
         </p>
         {mapsConfigured(season) && <div className="mini" ref={miniRef} />}
         <p className="coords">
-          {latlng(s.lat, s.lng)} · {placed ? 'placed by you' : 'from the address'}
+          {latlng(s.lat, s.lng)} · {placed ? 'placed by you' : initialPlace ? 'where you tapped' : 'from the address'}
         </p>
         <label className="lbl" htmlFor="add-addr">
           Address as it will show
@@ -232,7 +239,7 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting 
   }
 
   return (
-    <Sheet label="Add a house" onClose={close}>
+    <Sheet label="Add a house" onClose={close} tall>
       <div className="sheet-in">
         <div className="sheet-h">
           <div>

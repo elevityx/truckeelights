@@ -120,6 +120,21 @@ body{display:flex; flex-direction:column; height:100dvh; background:var(--bg); c
 .bar~.pbody .mapctl{top:30px}
 .maphint{position:absolute; left:50%; top:34px; transform:translateX(-50%); z-index:4; margin:0; font-size:13px; font-weight:700; white-space:nowrap; color:var(--text); background:var(--scrim); border:1px solid var(--line); padding:4px 12px; border-radius:999px; pointer-events:none; transition:opacity .5s}
 .maphint.gone{opacity:0}
+.hint-short{display:none}
+@media (max-width:599px){ .hint-long{display:none} .hint-short{display:inline} }
+/* Tap-to-add: lookup status, duplicate notice and friendly errors, in the hint's spot */
+.mappop-live{display:contents}
+.mappop{position:absolute; left:50%; top:30px; transform:translateX(-50%); z-index:6; width:max-content; max-width:min(520px, calc(100% - 24px)); display:flex; align-items:center; gap:10px;
+  padding:6px 6px 6px 14px; min-height:56px; background:var(--surface); color:var(--text); border:1px solid var(--line); border-radius:16px; box-shadow:0 8px 24px rgba(0,0,0,.45); font-size:14.5px; line-height:1.3}
+.mappop p{margin:0; flex:1; min-width:0; padding:6px 0}
+.mappop strong{color:var(--accent)}
+.mappop .btn{flex:none; padding:0 16px}
+.mappop .iconbtn{flex:none}
+@media (min-width:760px){ .maphint,.mappop{left:calc(50% + 100px)} .mappop{max-width:min(520px, calc(100% - 240px))} }
+.probe{width:42px; height:42px; filter:drop-shadow(0 0 8px var(--pin-glow)); animation:probe .8s ease-in-out infinite alternate}
+.probe svg{width:100%; height:100%; display:block}
+@keyframes probe{from{transform:translateY(0)}to{transform:translateY(-6px)}}
+.sheet-in h2.disp{font-size:30px; line-height:1.1; color:var(--accent)}
 
 .pin{position:absolute; width:46px; height:46px; margin:0; padding:0; border:0; background:none; transform:translate(-50%,-80%); cursor:pointer; display:grid; place-items:center; z-index:1}
 .pin .glyph{width:38px; height:38px; display:block; filter:drop-shadow(0 0 7px var(--g)); animation:flick 3.4s infinite; animation-delay:var(--d)}

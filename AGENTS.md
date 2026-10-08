@@ -12,7 +12,7 @@ The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cu
 - Next.js 16 App Router, static export (`output: 'export'`, `trailingSlash: true`). Every page is a client component and data loads in effects only, because the build prerenders with empty env. There is no server runtime, so security comes **only** from Postgres RLS and constraints.
 - TypeScript, Tailwind 4 (tokens per `[data-theme]` in `globals.css`).
 - Supabase: Postgres + Auth (anonymous sessions gated by Turnstile; admin password + TOTP MFA).
-- Google Maps JS (`@googlemaps/js-api-loader` 2, Advanced Markers, `PlaceAutocompleteElement`) behind `src/lib/maps`, with a keyless stub.
+- Google Maps JS (`@googlemaps/js-api-loader` 2, Advanced Markers, `PlaceAutocompleteElement`, `Geocoder` for tap-the-map-to-add) behind `src/lib/maps`, with a keyless stub (tap-to-add is off without a key).
 - Cloudflare Pages: `main` = production, branches = previews. DNS for truckeelights.com is on Cloudflare.
 
 ## Commands

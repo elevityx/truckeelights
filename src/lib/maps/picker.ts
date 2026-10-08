@@ -14,7 +14,18 @@ function randomId(n: number): string {
   return Array.from(buf, (b) => chars[b % chars.length]).join('');
 }
 
-function mountStubPicker(el: HTMLElement, region: Region, onPick: (p: PickedPlace) => void): () => void {
+export interface PickerOptions {
+  /** Move focus into the search box once it exists, unless the user already moved focus elsewhere. */
+  focus?: boolean;
+}
+
+function focusIfIdle(target: HTMLElement, host: HTMLElement) {
+  const a = document.activeElement;
+  const sheet = host.closest('[role="dialog"]');
+  if (!a || a === document.body || (sheet && sheet.contains(a) && /^H[1-3]$/.test(a.tagName))) target.focus();
+}
+
+function mountStubPicker(el: HTMLElement, region: Region, onPick: (p: PickedPlace) => void, o: PickerOptions = {}): () => void {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn alt';
@@ -29,12 +40,18 @@ function mountStubPicker(el: HTMLElement, region: Region, onPick: (p: PickedPlac
     }),
   );
   el.appendChild(btn);
+  if (o.focus) focusIfIdle(btn, el);
   return () => btn.remove();
 }
 
 /** Google Places autocomplete limited to the region; falls back to the stub without a Maps key. */
-export function createAddressPicker(el: HTMLElement, region: Region, onPick: (p: PickedPlace) => void): () => void {
-  if (publicEnv.mapsKey === '') return mountStubPicker(el, region, onPick);
+export function createAddressPicker(
+  el: HTMLElement,
+  region: Region,
+  onPick: (p: PickedPlace) => void,
+  o: PickerOptions = {},
+): () => void {
+  if (publicEnv.mapsKey === '') return mountStubPicker(el, region, onPick, o);
 
   let dead = false;
   let node: HTMLElement | null = null;
@@ -67,8 +84,9 @@ export function createAddressPicker(el: HTMLElement, region: Region, onPick: (p:
       }) as EventListener);
       node = pac as unknown as HTMLElement;
       el.appendChild(node);
+      if (o.focus) focusIfIdle(node, el);
     } catch {
-      if (!dead) stubCleanup = mountStubPicker(el, region, onPick);
+      if (!dead) stubCleanup = mountStubPicker(el, region, onPick, o);
     }
   })();
 

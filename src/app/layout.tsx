@@ -21,7 +21,8 @@ export const metadata: Metadata = {
   icons: '/favicon.ico',
 };
 
-export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#140A1F' };
+// resizes-content: Android Chrome shrinks the layout (and dvh) for the keyboard, so bottom sheets stay above it.
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#140A1F', interactiveWidget: 'resizes-content' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
