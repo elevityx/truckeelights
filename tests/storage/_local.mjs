@@ -80,7 +80,7 @@ export function totp(secretB32, now = Date.now()) { // RFC 6238, SHA-1, 30 s, 6 
 }
 
 const ADMINS = {
-  global: { id: '00000000-0000-4000-a000-00000000ad51', email: 'storage-admin@example.test', region: null },
+  global: { id: '00000000-0000-4000-a000-00000000ad02', email: 'storage-admin@example.test', region: null },
   testville: { id: '00000000-0000-4000-a000-00000000ad52', email: 'storage-admin-b@example.test', region: 'testville' },
 };
 const ADMIN_PW = 'local-storage-admin-pw'; // fake, local stack only

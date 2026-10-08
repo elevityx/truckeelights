@@ -6,7 +6,7 @@ Rules for any AI agent (Claude Code, Codex, Cursor, Antigravity) working in this
 truckeelights.com is a community map of decorated houses in Truckee, CA. It has two seasonal modes, **Christmas** (lights) and **Halloween**. Visitors add houses and photos. An admin back office picks the active season/theme and moderates photos.
 
 ## Status (2026-10)
-The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cutover. There is no Firebase code. Photos arrive in a later release.
+The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cutover. There is no Firebase code. Release 2 (photos) is integrated on the `r2/wp0-contracts` branch and goes live when it merges to `main`.
 
 ## Stack
 - Next.js 16 App Router, static export (`output: 'export'`, `trailingSlash: true`). Every page is a client component and data loads in effects only, because the build prerenders with empty env. There is no server runtime except the `photo-urls` signer Edge Function, so security comes **only** from Postgres RLS, constraints, and Storage policies.
@@ -16,10 +16,11 @@ The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cu
 - Cloudflare Pages: `main` = production, branches = previews. DNS for truckeelights.com is on Cloudflare.
 
 ## Commands
+Note: `next dev` may rewrite this file (Next.js agent-docs injection). Revert any such change before committing.
 ```bash
 nvm use            # Node version from .nvmrc
 npm ci
-npm run dev
+npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows without the database (dev only)
 npm run build      # static export to out/
 npm run lint
 npm run typecheck
@@ -37,16 +38,17 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 - `src/app` (pages), `src/components`
 - `src/lib/data` (the **only** Supabase caller)
 - `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
-- `src/components/photos` (visitor photo upload sheet)
+- `src/components/photos` (visitor photo upload sheet, `api.ts` data wiring, `devMock.ts` dev-only mock) and `src/components/house` (house sheet, photo strip, lightbox)
 - `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`)
 - `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
 - `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)
 - `public/og/{halloween,christmas}.png` (1200×630 social cards; site-wide OG/Twitter meta in `src/app/layout.tsx`). Source is `scripts/og/card.html`; regenerate with `node scripts/og/render.mjs` (needs local Chrome; not part of the build)
 - `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
-- `supabase/functions` (Edge Functions; the photo signer lands with the photos database work)
+- `supabase/functions` (Edge Functions; `photo-urls` is the photo signer)
 - `tests/db-concurrency` (Node test runner, needs the local stack)
 - `tests/storage` (Storage and runner tests, Node test runner, needs the local stack)
+- `docs/` (ARCHITECTURE, DATA_MODEL, DECISIONS)
 - `.github/workflows/ci.yml`
 
 ## Invariants (do not break)

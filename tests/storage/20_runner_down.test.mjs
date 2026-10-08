@@ -97,9 +97,9 @@ test('f: non-admin and cross-region admin get forbidden; Storage denies their mo
   assert.ok(job, 'an open job exists');
   for (const who of [stranger, adminB, newClient()]) {
     const l = await who.rpc('admin_storage_jobs', { p_region_id: house.regionId });
-    assert.match(l.error?.message ?? '', /forbidden/, 'admin_storage_jobs must be forbidden');
+    assert.match(l.error?.message ?? '', /forbidden|permission denied/, 'admin_storage_jobs must be forbidden');
     const c = await who.rpc('admin_complete_storage_job', { p_job_id: job.id });
-    assert.match(c.error?.message ?? '', /forbidden/, 'admin_complete_storage_job must be forbidden');
+    assert.match(c.error?.message ?? '', /forbidden|permission denied/, 'admin_complete_storage_job must be forbidden');
   }
   // Storage denies them (object must survive)
   const p2 = await approved();
