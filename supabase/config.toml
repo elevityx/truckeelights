@@ -392,6 +392,11 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# The photo signer authorizes from the database (approved photos of public houses only), not from the caller.
+# Callers use the publishable key. The function never takes a path, bucket, or TTL from the request.
+[functions.photo-urls]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

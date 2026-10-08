@@ -9,9 +9,9 @@ truckeelights.com is a community map of decorated houses in Truckee, CA. It has 
 The Supabase rewrite is on `feat/seasonal-revival` and goes live on `main` at cutover. There is no Firebase code. Photos arrive in a later release.
 
 ## Stack
-- Next.js 16 App Router, static export (`output: 'export'`, `trailingSlash: true`). Every page is a client component and data loads in effects only, because the build prerenders with empty env. There is no server runtime, so security comes **only** from Postgres RLS and constraints.
+- Next.js 16 App Router, static export (`output: 'export'`, `trailingSlash: true`). Every page is a client component and data loads in effects only, because the build prerenders with empty env. There is no server runtime except the `photo-urls` signer Edge Function, so security comes **only** from Postgres RLS, constraints, and Storage policies.
 - TypeScript, Tailwind 4 (tokens per `[data-theme]` in `globals.css`).
-- Supabase: Postgres + Auth (anonymous sessions gated by Turnstile; admin password + TOTP MFA).
+- Supabase: Postgres + Auth (anonymous sessions gated by Turnstile; admin password + TOTP MFA) + Storage (two **private** buckets, `photo-uploads` and `photos`; no public read, no UPDATE policy). Revocation runs through `private.storage_jobs`, dispatched by pg_net, retried by pg_cron every 30 s, with the Storage API URL and key in Vault (`supabase/storage-jobs-local.sh` sets them locally). Public photo URLs (1 h) come only from the `photo-urls` Edge Function (`supabase/functions/photo-urls`), which signs only what `public.photo_sign_paths` (service_role only) returns: the newest approved photos of public houses.
 - Google Maps JS (`@googlemaps/js-api-loader` 2, Advanced Markers, `PlaceAutocompleteElement`, `Geocoder` for tap-the-map-to-add) behind `src/lib/maps`, with a keyless stub (tap-to-add is off without a key).
 - Cloudflare Pages: `main` = production, branches = previews. DNS for truckeelights.com is on Cloudflare.
 
@@ -58,12 +58,14 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 6. **No HTML strings built from data.** Render through React or `textContent`, never `innerHTML`.
 7. Schema changes go through versioned migrations under `supabase/migrations/`. Don't make ad-hoc changes in the dashboard.
 8. A new function needs an explicit `grant execute` on its exact signature and an update to the ACL allowlist test (`supabase/tests/01_acl.test.sql`).
-9. `private` schema USAGE is **not** granted to API roles in R1. If a later release grants it for Storage policy helpers, the ACL test changes in the same PR.
-10. Private tables (`private.quota_events`, `private.blocked_terms`) have RLS enabled **and forced**, with no policies and no grants. The security-definer RPCs keep working because the owner role has BYPASSRLS. Do not switch to policies without updating the pgTAP tests.
+9. `private` schema USAGE is granted to `authenticated` **only** (never anon), so the Storage policies can call the two policy helpers `private.photo_upload_allowed` and `private.storage_admin_ok`. Every other `private` function has no EXECUTE for API roles, and private tables keep FORCE RLS with no grants, so direct access still fails with 42501 (pgTAP 01/06).
+10. Private tables (`private.quota_events`, `private.blocked_terms`, `private.storage_jobs`) have RLS enabled **and forced**, with no policies and no grants. The security-definer RPCs keep working because the owner role has BYPASSRLS. Do not switch to policies without updating the pgTAP tests.
+11. A state change that ends public reads of a photo (revoke, release, hide, season switch, reject, expiry) enqueues its storage job **in the same transaction**. A job is done only when `storage.objects` confirms the new state, never on an HTTP status. Photo paths take locks in one order: per-photo advisory lock, then the `photos` row, then `storage_jobs` rows.
+12. The `net` and `vault` schemas are never exposed through the Data API (`[api] schemas` stays `["public"]`). `public.photos` has no grants or policies for API roles; the public reads photos only through the signer.
 
 **CI** (`.github/workflows/ci.yml`): runs on PRs and pushes with no secrets and no `pull_request_target`, actions pinned by SHA. Job `web` runs lint, typecheck, tests, build, `npm audit --omit=dev --audit-level=high`, and a privacy grep. Job `db` starts the local stack with `npm run db:start`, then runs `supabase db reset`, pgTAP, and the concurrency tests.
 
-**Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch.
+**Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch. The admin re-encode on approve runs in the admin's browser: the server verifies the approved object exists in the right house folder, not that it was re-encoded. Revocation takes seconds while the admin page is open (it runs the jobs itself) and up to about 1 min on the cron retry otherwise, plus CDN propagation. Anyone can ask the signer for 1-hour URLs of approved photos of public houses (they're public by design).
 
 **PR rule**: any PR that changes stack, commands, env vars, layout, schema/RLS/grants, CI, or deploy updates this file in the same PR.
 
