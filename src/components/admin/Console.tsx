@@ -6,19 +6,16 @@ import {
   adminListHouses,
   adminReleaseHouse,
   adminSetHouseStatus,
-  adminSetSeason,
-  getRegionContext,
   listMapHouses,
   toDataError,
   userMessage,
   type AdminHouse,
   type HouseStatus,
   type RegionContext,
-  type Season,
 } from '@/lib/data';
-import { applySeason } from '@/lib/theme/applySeason';
+import SeasonPanel from './SeasonPanel';
+import { SEASON_LABEL } from './seasonState';
 
-const SEASON_LABEL: Record<Season, string> = { halloween: 'Halloween', christmas: 'Christmas' };
 const REASONS = ['Duplicate', 'Not a display', 'Owner asked us to remove it', 'Inappropriate', 'Other'];
 
 interface Props {
@@ -70,80 +67,6 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
         )}
       </div>
     </div>
-  );
-}
-
-function SeasonPanel({ ctx, onCtx, onForbidden }: Pick<Props, 'ctx' | 'onCtx' | 'onForbidden'>) {
-  const [season, setSeason] = useState<Season>(ctx.season);
-  const [year, setYear] = useState(String(ctx.year));
-  const [open, setOpen] = useState(ctx.submissionsOpen);
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  const y = Number(year);
-  const yearOk = Number.isInteger(y) && y >= 2024 && y <= 2100;
-
-  async function apply() {
-    setBusy(true);
-    setMsg(null);
-    try {
-      await adminSetSeason(ctx.region.id, season, y, open);
-      const fresh = await getRegionContext(ctx.region.slug);
-      applySeason(fresh.season);
-      onCtx(fresh);
-      setConfirming(false);
-      setMsg({ ok: true, text: 'Saved. The public site now shows this season.' });
-    } catch (e) {
-      const d = toDataError(e);
-      if (d.code === 'forbidden') return onForbidden();
-      setMsg({ ok: false, text: userMessage(d, ctx.region.name) });
-      setConfirming(false);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="panel" aria-label="Season">
-      <h3>Season and submissions</h3>
-      <div className="form">
-        <fieldset>
-          <legend>Season</legend>
-          {(['halloween', 'christmas'] as const).map((s) => (
-            <label key={s} className="radio">
-              <input type="radio" name="season" checked={season === s} onChange={() => setSeason(s)} />
-              {SEASON_LABEL[s]}
-            </label>
-          ))}
-        </fieldset>
-        <fieldset>
-          <legend>Year</legend>
-          <input className="field" type="number" min={2024} max={2100} value={year} aria-label="Year" onChange={(e) => setYear(e.target.value)} />
-        </fieldset>
-        <fieldset>
-          <legend>Submissions</legend>
-          <button type="button" className="sw" role="switch" aria-checked={open} onClick={() => setOpen((o) => !o)}>
-            <span className="tr" />
-            Visitors can add houses
-          </button>
-        </fieldset>
-      </div>
-      {!confirming ? (
-        <div className="row">
-          <button className="btn primary" type="button" disabled={!yearOk} onClick={() => setConfirming(true)}>Make active</button>
-        </div>
-      ) : (
-        <div className="confirm">
-          <p>Switch {ctx.region.name} to {SEASON_LABEL[season]} {y}, submissions {open ? 'open' : 'closed'}?</p>
-          <div className="row">
-            <button className="btn alt" type="button" disabled={busy} onClick={apply}>Yes, make it live</button>
-            <button className="btn ghost" type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-      {msg && <p className={msg.ok ? 'ok' : 'err'} role="status">{msg.text}</p>}
-    </section>
   );
 }
 
