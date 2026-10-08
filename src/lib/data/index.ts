@@ -3,3 +3,6 @@ export * from './errors';
 export * from './public';
 export * from './submit';
 export * from './admin';
+export * from './photos';
+export * from './adminPhotos';
+export * from './storageJobs';

@@ -5,7 +5,8 @@ import { publicEnv } from '@/config/public-env';
 import type { PinView, Season } from '@/lib/data/types';
 import { houseShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { firstSegment, restSegment } from '@/lib/text/address';
-import { DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
+import PhotoStrip from '@/components/house/PhotoStrip';
+import { CamIcon, DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
 
 interface Props {
   pin: PinView;
@@ -13,9 +14,12 @@ interface Props {
   year: number;
   onClose(): void;
   onToast(msg: string): void;
+  /** Set only while photo uploads are open. */
+  onAddPhotos?: () => void;
+  photosRefreshKey?: number;
 }
 
-export default function HouseSheet({ pin, season, year, onClose, onToast }: Props) {
+export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey }: Props) {
   const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin.address)}`;
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
@@ -53,10 +57,16 @@ export default function HouseSheet({ pin, season, year, onClose, onToast }: Prop
           </ul>
         </div>
         <div className="sec">
-          <p className="nophotos">No photos yet.</p>
+          <PhotoStrip houseId={pin.id} refreshKey={photosRefreshKey ?? 0} />
         </div>
         <div className="sec">
           <div className="actions">
+            {onAddPhotos && (
+              <button className="btn primary" type="button" onClick={onAddPhotos}>
+                <CamIcon />
+                Add photos
+              </button>
+            )}
             <a className="btn ghost" href={dirUrl} target="_blank" rel="noopener">
               <DirIcon />
               Directions
@@ -66,6 +76,7 @@ export default function HouseSheet({ pin, season, year, onClose, onToast }: Prop
               Share this house
             </button>
           </div>
+          {onAddPhotos && <p className="fine">Photos appear after a quick review.</p>}
         </div>
       </div>
     </Sheet>

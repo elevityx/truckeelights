@@ -25,9 +25,10 @@ npm run lint
 npm run typecheck
 npm test
 npm run db:start   # local Supabase stack (sets local-only auth env; don't run bare `supabase start`)
-supabase db reset
+npm run db:reset   # supabase db reset, then supabase/storage-jobs-local.sh (local storage-runner setup)
 npm run db:test
 npm run test:concurrency
+npm run test:storage   # tests/storage, serialized (--test-concurrency=1); needs the local stack
 ```
 Local env: copy `.env.example` to `.env.local`. It holds the `NEXT_PUBLIC_*` values (Supabase URL and publishable key, Turnstile site key, optional Maps key and map ids, site URL), all public.
 The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_SECRET` through `supabase/config.toml`. `supabase/start-local.sh` (via `npm run db:start`) defaults them to `http://localhost:3000` and Cloudflare's public always-pass test secret. Never put a real captcha secret in the repo.
@@ -35,13 +36,17 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 ## Layout
 - `src/app` (pages), `src/components`
 - `src/lib/data` (the **only** Supabase caller)
+- `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
+- `src/components/photos` (visitor photo upload sheet)
 - `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`)
 - `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
 - `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)
 - `public/og/{halloween,christmas}.png` (1200×630 social cards; site-wide OG/Twitter meta in `src/app/layout.tsx`). Source is `scripts/og/card.html`; regenerate with `node scripts/og/render.mjs` (needs local Chrome; not part of the build)
 - `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
+- `supabase/functions` (Edge Functions; the photo signer lands with the photos database work)
 - `tests/db-concurrency` (Node test runner, needs the local stack)
+- `tests/storage` (Storage and runner tests, Node test runner, needs the local stack)
 - `.github/workflows/ci.yml`
 
 ## Invariants (do not break)

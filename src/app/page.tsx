@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AddHouseSheet from '@/components/add/AddHouseSheet';
+import AddPhotosSheet from '@/components/photos/AddPhotosSheet';
 import HouseSheet from '@/components/house/HouseSheet';
 import ListView from '@/components/list/ListView';
 import LoreBar from '@/components/lore/LoreBar';
@@ -28,7 +29,8 @@ export default function HomePage() {
   const [pins, setPins] = useState<PinView[]>([]);
   const [view, setView] = useState<'map' | 'list'>('map');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'house' | 'add' | null>(null);
+  const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | null>(null);
+  const [photosKey, setPhotosKey] = useState(0);
   const [addAt, setAddAt] = useState<{ place: PickedPlace; n: number } | null>(null); // map tap -> Add sheet at the pin step
   const [error, setError] = useState<DataError | 'unconfigured' | null>(null);
   const [toast, setToast] = useState('');
@@ -96,11 +98,12 @@ export default function HomePage() {
     setUrlHouse(null);
   }, []);
 
-  const reload = async (thenSelect: string) => {
+  const reload = async (thenSelect: string, then?: () => void) => {
     if (!ctx) return;
     try {
       setPins(await listMapHouses(ctx.region.id));
       select(thenSelect);
+      then?.();
     } catch (e) {
       showToast(userMessage(toDataError(e)));
     }
@@ -175,7 +178,15 @@ export default function HomePage() {
       />
       <footer id="site-footer" />
       {sheet === 'house' && selectedPin && (
-        <HouseSheet pin={selectedPin} season={ctx.season} year={ctx.year} onClose={closeSheet} onToast={showToast} />
+        <HouseSheet
+          pin={selectedPin}
+          season={ctx.season}
+          year={ctx.year}
+          onClose={closeSheet}
+          onToast={showToast}
+          onAddPhotos={ctx.photosOpen ? () => setSheet('photos') : undefined}
+          photosRefreshKey={photosKey}
+        />
       )}
       {sheet === 'add' && (
         <AddHouseSheet
@@ -186,6 +197,24 @@ export default function HomePage() {
           onClose={() => setSheet(null)}
           onCreated={(id) => void reload(id)}
           onOpenExisting={(id) => select(id)}
+          onAddPhotos={
+            ctx.photosOpen
+              ? (id) => {
+                  void reload(id, () => setSheet('photos'));
+                }
+              : undefined
+          }
+        />
+      )}
+      {sheet === 'photos' && selectedPin && (
+        <AddPhotosSheet
+          ctx={ctx}
+          house={selectedPin}
+          onClose={() => setSheet('house')}
+          onDone={() => {
+            setPhotosKey((k) => k + 1);
+            setSheet('house');
+          }}
         />
       )}
       <Toast message={toast} />

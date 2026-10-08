@@ -34,6 +34,12 @@ export const ShareIcon = () => (
     <path d="M8 12h-2v8h12v-8h-2M12 3v12M8 7l4-4 4 4" />
   </Svg>
 );
+export const CamIcon = () => (
+  <Svg>
+    <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </Svg>
+);
 export const WarnIcon = () => (
   <Svg>
     <path d="M12 3l10 18H2z" />
