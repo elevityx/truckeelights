@@ -9,7 +9,7 @@ import MapView from '@/components/map/MapView';
 import Header from '@/components/shell/Header';
 import { ListIcon, MapIcon } from '@/components/shell/Icons';
 import Toast from '@/components/shell/Toast';
-import { supabaseConfigured } from '@/config/public-env';
+import { publicEnv, supabaseConfigured } from '@/config/public-env';
 import {
   getRegionContext,
   listMapHouses,
@@ -20,6 +20,7 @@ import {
   type RegionContext,
 } from '@/lib/data';
 import type { PickedPlace } from '@/lib/maps/types';
+import { mapShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { applySeason } from '@/lib/theme/applySeason';
 
 export default function HomePage() {
@@ -165,7 +166,13 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-      <LoreBar season={ctx.season} />
+      <LoreBar
+        season={ctx.season}
+        onShare={async () => {
+          const msg = shareToast(await shareOrCopy(mapShareData(ctx.season, publicEnv.siteUrl), navigator));
+          if (msg) showToast(msg);
+        }}
+      />
       <footer id="site-footer" />
       {sheet === 'house' && selectedPin && (
         <HouseSheet pin={selectedPin} season={ctx.season} year={ctx.year} onClose={closeSheet} onToast={showToast} />

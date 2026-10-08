@@ -37,6 +37,9 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 - `src/lib/data` (the **only** Supabase caller)
 - `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`)
+- `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
+- `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)
+- `public/og/{halloween,christmas}.png` (1200×630 social cards; site-wide OG/Twitter meta in `src/app/layout.tsx`). Source is `scripts/og/card.html`; regenerate with `node scripts/og/render.mjs` (needs local Chrome; not part of the build)
 - `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
 - `tests/db-concurrency` (Node test runner, needs the local stack)
 - `.github/workflows/ci.yml`

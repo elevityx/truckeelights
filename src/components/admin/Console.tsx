@@ -48,6 +48,7 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
         <span className="chip">{ctx.region.name}</span>
         <span className="sp" />
         <Link className="btn ghost" href="/">View public map</Link>
+        <Link className="btn ghost" href={`/flyer/?season=${ctx.season}`}>Print a flyer</Link>
         <button className="btn ghost" type="button" onClick={onSignOut}>Sign out</button>
       </header>
       <div className="adm-in">

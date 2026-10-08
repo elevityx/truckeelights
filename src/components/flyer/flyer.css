@@ -1,0 +1,41 @@
+/* Printable flyer. The paper is always black on white so it prints well in B/W; the toolbar around it uses the theme tokens. */
+.flyer-page{position:absolute; inset:0; overflow:auto; background:var(--bg); color:var(--text); padding:12px 16px 32px}
+.flyer-tools{display:flex; flex-wrap:wrap; align-items:center; gap:10px; max-width:816px; margin:0 auto 12px}
+.flyer-tools .btn{min-height:40px; padding:0 16px; font-size:14px}
+.flyer-tools .btn.primary{margin-left:auto}
+.flyer-tools .seg button{min-height:34px; padding:0 12px; font-size:14px}
+
+.flyer{box-sizing:border-box; max-width:816px; margin:0 auto; background:#fff; color:#000; border-radius:6px; padding:clamp(20px, 6vw, 48px);
+  display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; box-shadow:0 0 0 3px var(--deco), 0 18px 50px rgba(0,0,0,.5);
+  font-family:var(--body); -webkit-print-color-adjust:exact; print-color-adjust:exact}
+.flyer p{margin:0}
+.fl-kicker{font-size:clamp(13px, 2.6vw, 17px); font-weight:700; letter-spacing:.14em; text-transform:uppercase}
+.fl-wm{margin:0; font-size:clamp(44px, 12vw, 92px); line-height:.95; color:#000; text-shadow:none; font-weight:400}
+.fl-head{font-size:clamp(22px, 5.4vw, 38px); font-weight:800; line-height:1.15; max-width:15em}
+.fl-motif{width:100%; height:auto; max-height:96px; margin:4px 0}
+.fl-main{display:grid; grid-template-columns:auto 1fr; gap:clamp(16px, 4vw, 32px); align-items:center; width:100%; text-align:left; margin-top:4px}
+.fl-qr{margin:0; display:flex; flex-direction:column; align-items:center; gap:6px}
+.fl-qr svg{width:clamp(180px, 42vw, 330px); height:auto; display:block; border:3px solid #000; border-radius:10px}
+.fl-qr figcaption{font-size:clamp(16px, 3.4vw, 24px); font-weight:800; letter-spacing:.02em}
+.fl-steps{margin:0; padding:0; list-style:none; counter-reset:st; display:flex; flex-direction:column; gap:14px; font-size:clamp(16px, 3.2vw, 22px); line-height:1.3}
+.fl-steps li{counter-increment:st; display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start}
+.fl-steps li::before{content:counter(st); display:grid; place-items:center; width:1.7em; height:1.7em; border-radius:50%; border:2.5px solid #000; font-weight:800; font-family:var(--font-display); font-size:1.05em; line-height:1}
+.fl-pitch{font-size:clamp(15px, 2.8vw, 19px); max-width:34em; margin-top:8px!important}
+.fl-foot{font-size:clamp(14px, 2.6vw, 17px); font-style:italic; border-top:2px dashed #000; padding-top:10px; width:100%}
+@media (max-width:599px){ .fl-main{grid-template-columns:1fr; justify-items:center} }
+
+@page{size:letter portrait; margin:.5in}
+@media print{
+  :root{color-scheme:light}
+  html,body{height:auto!important; overflow:visible!important; display:block!important; background:#fff!important}
+  .flyer-page{position:static; overflow:visible; padding:0; background:#fff}
+  .flyer-tools{display:none}
+  .flyer{max-width:none; width:7.5in; height:9.9in; padding:.2in .1in; border-radius:0; box-shadow:none; justify-content:space-between; break-inside:avoid; page-break-inside:avoid}
+  .fl-wm{font-size:68pt}
+  .fl-head{font-size:28pt}
+  .fl-main{grid-template-columns:3.5in 1fr}
+  .fl-qr svg{width:3.4in}
+  .fl-steps{font-size:16pt}
+  .fl-pitch{font-size:14pt}
+  .fl-foot{font-size:13pt}
+}

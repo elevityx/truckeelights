@@ -1,0 +1,103 @@
+<!doctype html>
+<!-- Social preview card source (1200x630). Rendered to public/og/<season>.png by scripts/og/render.mjs. Not shipped. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Creepster&family=Fraunces:ital,opsz,wght@1,9..144,700&family=Atkinson+Hyperlegible+Next:wght@400;700;800&display=block" rel="stylesheet">
+<style>
+  html,body{margin:0; width:1200px; height:630px; overflow:hidden}
+  body{font-family:"Atkinson Hyperlegible Next", system-ui, sans-serif}
+  .card{position:relative; width:1200px; height:630px; overflow:hidden; color:var(--text); background:radial-gradient(900px 420px at 72% 18%, var(--glow), transparent 60%), linear-gradient(180deg, var(--bar-a), var(--bg) 70%)}
+  .halloween{--bg:#140A1F; --bar-a:#2a1245; --text:#F3ECDA; --muted:#B8A9CF; --wm:#8AE234; --wm2:#FF7A1A; --accent:#8AE234; --on-accent:#140A1F; --deco:#7B3FBF; --glow:rgba(123,63,191,.38); --far:#3a1f5e; --near:#0e0518; --edge:#7B3FBF; --pglow:#FF7A1A}
+  .christmas{--bg:#0B1626; --bar-a:#173058; --text:#F7F5EF; --muted:#AFC0D6; --wm:#F2C14E; --wm2:#F7F5EF; --accent:#F2C14E; --on-accent:#0B1626; --deco:#2E8B57; --glow:rgba(242,193,78,.18); --far:#2c4466; --near:#08111f; --edge:#a9c2e0; --pglow:#F2C14E}
+  .copy{position:absolute; z-index:1; left:72px; top:64px; right:72px}
+  .kicker{margin:0; font-weight:800; font-size:26px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+  .wm{margin:10px 0 0; font-family:Creepster, cursive; font-weight:400; font-size:150px; line-height:.95; color:var(--wm); text-shadow:0 4px 0 #2c5509, 0 8px 0 #1a0d29, 0 0 40px rgba(138,226,52,.45)}
+  .wm span{color:var(--wm2); text-shadow:0 4px 0 #7a3305, 0 8px 0 #1a0d29, 0 0 40px rgba(255,122,26,.45)}
+  .christmas .wm{font-family:Fraunces, serif; font-style:italic; font-weight:700; font-size:132px; text-shadow:0 0 30px rgba(242,193,78,.45)}
+  .christmas .wm span{text-shadow:0 0 30px rgba(247,245,239,.3)}
+  .tag{margin:22px 0 0; font-size:36px; font-weight:700; line-height:1.2; max-width:760px}
+  .cta{position:absolute; left:72px; top:440px; display:inline-flex; align-items:center; gap:14px; background:var(--accent); color:var(--on-accent); font-weight:800; font-size:30px; padding:14px 30px; border-radius:999px; box-shadow:0 0 0 4px rgba(0,0,0,.25), 0 0 40px color-mix(in srgb, var(--accent) 45%, transparent)}
+  .url{position:absolute; right:72px; top:452px; font-size:28px; font-weight:800; color:var(--text); letter-spacing:.02em}
+  svg.ridge{position:absolute; left:0; bottom:0; width:1200px; height:150px}
+  .drip{position:absolute; left:0; right:0; top:0; height:16px; background:radial-gradient(circle at 20px 0, var(--wm) 10px, transparent 11px) 0 0/80px 16px repeat-x; opacity:.85}
+  .christmas .drip{background:radial-gradient(circle at 20px 6px, #ff5a5f 5px, transparent 6px) 0 0/120px 16px repeat-x, radial-gradient(circle at 60px 8px, #6fd3ff 5px, transparent 6px) 0 0/120px 16px repeat-x, radial-gradient(circle at 100px 6px, #F2C14E 5px, transparent 6px) 0 0/120px 16px repeat-x}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="drip"></div>
+  <div class="copy">
+    <p class="kicker" id="kicker"></p>
+    <h1 class="wm" id="wm"></h1>
+    <p class="tag" id="tag"></p>
+  </div>
+  <div class="cta" id="cta"></div>
+  <div class="url">truckeelights.com</div>
+  <svg class="ridge" viewBox="0 0 1200 150" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <radialGradient id="pg"><stop offset="0" stop-color="var(--pglow)" stop-opacity=".95"/><stop offset="1" stop-color="var(--pglow)" stop-opacity="0"/></radialGradient>
+    </defs>
+    <path d="M0 80L60 52L120 70L190 40L250 66L320 34L380 60L440 44L520 70L600 50L680 72L760 38L830 62L900 30L970 58L1040 42L1110 66L1200 48V150H0Z" fill="var(--far)"/>
+    <path d="M0 80L60 52L120 70L190 40L250 66L320 34L380 60L440 44L520 70L600 50L680 72L760 38L830 62L900 30L970 58L1040 42L1110 66L1200 48" fill="none" stroke="var(--edge)" stroke-opacity=".6" stroke-width="2"/>
+    <path d="M0 150V120L120 112L260 92L380 70L470 56L520 54V150ZM680 54L730 56L820 70L940 92L1080 112L1200 120V150Z" fill="var(--near)"/>
+    <path d="M0 120L120 112L260 92L380 70L470 56L520 54M680 54L730 56L820 70L940 92L1080 112L1200 120" fill="none" stroke="var(--edge)" stroke-width="2.4"/>
+    <rect x="0" y="128" width="1200" height="22" fill="var(--near)"/>
+    <path d="M0 128H1200" stroke="var(--edge)" stroke-width="2"/>
+    <path d="M0 134H1200" stroke="var(--edge)" stroke-opacity=".6" stroke-width="2" stroke-dasharray="3 8"/>
+    <g id="portals"></g>
+    <g id="guest"></g>
+  </svg>
+</div>
+<script>
+  // Constant copy only; this file is a design source, never served.
+  const season = new URLSearchParams(location.search).get('season') === 'christmas' ? 'christmas' : 'halloween';
+  const C = {
+    halloween: { kicker: 'Truckee, CA · Halloween', wm: ['Truckee', 'Frights'], tag: 'The spooky house map. Find the best scares in town.', cta: 'Add your spooky house' },
+    christmas: { kicker: 'Truckee, CA · Christmas', wm: ['Truckee', 'Lights'], tag: 'The holiday lights map. Find the brightest houses in town.', cta: 'Add your lit-up house' },
+  }[season];
+  document.getElementById('card').classList.add(season);
+  document.getElementById('kicker').textContent = C.kicker;
+  const wm = document.getElementById('wm');
+  wm.append(C.wm[0] + ' ');
+  const s = document.createElement('span'); s.textContent = C.wm[1]; wm.append(s);
+  document.getElementById('tag').textContent = C.tag;
+  document.getElementById('cta').textContent = C.cta + ' →';
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.append(e); return e; };
+  const portals = document.getElementById('portals');
+  for (const x of [520, 680]) {
+    el('path', { d: `M${x - 34} 128v-28a34 34 0 0 1 68 0v28z`, fill: season === 'halloween' ? '#2f1b4a' : '#2c4466', stroke: 'var(--edge)', 'stroke-width': 2 }, portals);
+    el('path', { d: `M${x - 26} 128v-26a26 26 0 0 1 52 0v26z`, fill: season === 'halloween' ? '#05020a' : '#08111f' }, portals);
+    el('ellipse', { cx: x, cy: 110, rx: 36, ry: 26, fill: 'url(#pg)' }, portals);
+  }
+  const g = document.getElementById('guest');
+  if (season === 'halloween') {
+    el('circle', { cx: 1040, cy: -0, r: 0 }, g);
+    const ghost = (x, y, sc) => {
+      const gg = el('g', { transform: `translate(${x} ${y}) scale(${sc})` }, g);
+      el('path', { d: 'M-8 9V-1a8 8 0 0 1 16 0V9l-2.7-2.6-2.6 2.6-2.7-2.6-2.7 2.6-2.6-2.6z', fill: '#F7F1E3', 'fill-opacity': '.93' }, gg);
+      el('ellipse', { cx: -2.4, cy: -1.6, rx: 1.5, ry: 2.2, fill: '#140A1F' }, gg);
+      el('ellipse', { cx: 3.2, cy: -1.6, rx: 1.5, ry: 2.2, fill: '#140A1F' }, gg);
+      el('ellipse', { cx: 0.6, cy: 3.6, rx: 1.4, ry: 1.9, fill: '#140A1F' }, gg);
+    };
+    ghost(600, 96, 2.6); ghost(560, 70, 1.8); ghost(740, 84, 2);
+    const pk = el('g', { transform: 'translate(430 120) scale(2.2)' }, g);
+    el('ellipse', { rx: 4.6, ry: 3.8, fill: '#FF7A1A' }, pk);
+    el('path', { d: 'M-2.2-1l1 1.2-1.6.3zM2.2-1l-1 1.2 1.6.3zM-2.4 1.2q2.4 1.8 4.8 0', fill: '#3a1600' }, pk);
+  } else {
+    for (const [x, y] of [[560, 120], [640, 124], [760, 118]]) {
+      const t = el('g', { transform: `translate(${x} ${y})` }, g);
+      el('path', { d: 'M-12 8L0-22L12 8Z', fill: '#2E8B57' }, t);
+      for (const [cx, cy, c] of [[-4, 2, '#ff5a5f'], [4, -6, '#6fd3ff'], [-1, -12, '#F2C14E']]) el('circle', { cx, cy, r: 2, fill: c }, t);
+    }
+  }
+</script>
+<style>
+  /* moon (halloween) / star (christmas) */
+  .halloween::after{content:""; position:absolute; right:56px; top:40px; width:92px; height:92px; border-radius:50%; background:#F3ECDA; box-shadow:0 0 60px rgba(243,236,218,.35); opacity:.92}
+  .christmas::after{content:"\2605"; position:absolute; right:64px; top:30px; font-size:96px; color:#F2C14E; text-shadow:0 0 40px rgba(242,193,78,.6)}
+</style>
+</body>
+</html>

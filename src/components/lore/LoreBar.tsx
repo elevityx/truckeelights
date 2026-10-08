@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import type { Season } from '@/lib/data/types';
 import { splitBold } from '@/lib/text/address';
+import { ShareIcon } from '@/components/shell/Icons';
 import { LORE } from './lore-data';
 
-export default function LoreBar({ season }: { season: Season }) {
+/** Bottom bar: a rotating Truckee fact, plus the quiet "Share the map" action (kept out of the header on purpose). */
+export default function LoreBar({ season, onShare }: { season: Season; onShare?: () => void }) {
   const [i, setI] = useState(0);
   const facts = LORE[season];
   const parts = splitBold(facts[i % facts.length]);
@@ -21,6 +23,12 @@ export default function LoreBar({ season }: { season: Season }) {
       <button type="button" aria-label="Show another Truckee fact" onClick={() => setI((n) => (n + 1) % facts.length)}>
         Next
       </button>
+      {onShare && (
+        <button type="button" className="lore-share" aria-label="Share the map" onClick={onShare}>
+          <ShareIcon />
+          <span className="ls-long">Share map</span>
+        </button>
+      )}
     </p>
   );
 }
