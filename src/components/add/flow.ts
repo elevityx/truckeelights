@@ -20,6 +20,10 @@ export interface FlowState {
   error: string;
   captchaKey: number; // bumped to remount Turnstile after captcha_failed
   result: FlowResult | null;
+  /** The address text was typed by the user since the last automatic fill. */
+  edited: boolean;
+  /** Pin-drag lookup: seq of the latest drag (older answers are stale), whether it is running, a note, and Undo text. */
+  geo: { seq: number; busy: boolean; note: string; undo: string | null };
 }
 
 export const initialState: FlowState = {
@@ -33,7 +37,12 @@ export const initialState: FlowState = {
   error: '',
   captchaKey: 0,
   result: null,
+  edited: false,
+  geo: { seq: 0, busy: false, note: '', undo: null },
 };
+
+export const NUDGE_MESSAGE = "Couldn't find a street address there. Nudge the pin onto the house.";
+
 
 export const STREET_LEVEL_MESSAGE = 'Pick a street address (house number and street)';
 export const BLOCKED_MESSAGE = "This address can't be added right now. Contact us if this is your house.";
@@ -42,6 +51,9 @@ export type FlowAction =
   | { type: 'picked'; place: PickedPlace }
   | { type: 'setAddress'; address: string }
   | { type: 'moved'; lat: number; lng: number }
+  | { type: 'geocoded'; seq: number; place: PickedPlace }
+  | { type: 'geocodeFailed'; seq: number; message: string }
+  | { type: 'undoAddress' }
   | { type: 'confirm' }
   | { type: 'goStep'; step: Step }
   | { type: 'submitStart' }
@@ -65,13 +77,35 @@ export function reducer(s: FlowState, a: FlowAction): FlowState {
         confirmed: false,
         error: '',
         result: null,
+        edited: false,
+        geo: { seq: s.geo.seq + 1, busy: false, note: '', undo: null },
       };
     }
     case 'setAddress':
-      return { ...s, address: a.address, confirmed: false, error: '' };
+      return { ...s, address: a.address, confirmed: false, error: '', edited: true, geo: { ...s.geo, undo: null } };
     case 'moved':
-      return { ...s, lat: a.lat, lng: a.lng, confirmed: false };
+      // Start a new lookup; any answer for an older seq is ignored.
+      return { ...s, lat: a.lat, lng: a.lng, confirmed: false, geo: { ...s.geo, seq: s.geo.seq + 1, busy: true, note: '' } };
+    case 'geocoded': {
+      if (a.seq !== s.geo.seq || !s.place) return s;
+      // place_id and address always change together, so the submitted id matches the shown address.
+      return {
+        ...s,
+        place: { ...a.place, lat: s.lat, lng: s.lng },
+        address: a.place.address,
+        edited: false,
+        error: '',
+        geo: { ...s.geo, busy: false, note: '', undo: s.edited && s.address !== a.place.address ? s.address : null },
+      };
+    }
+    case 'geocodeFailed':
+      if (a.seq !== s.geo.seq) return s;
+      return { ...s, geo: { ...s.geo, busy: false, note: a.message } }; // pin stays put, previous address and place kept
+    case 'undoAddress':
+      if (s.geo.undo === null) return s;
+      return { ...s, address: s.geo.undo, edited: true, confirmed: false, geo: { ...s.geo, undo: null } };
     case 'confirm': {
+      if (s.geo.busy) return s; // wait for the address that matches the pin
       const problem = validateAddress(s.address);
       if (problem) return { ...s, error: addressProblemMessage(problem) };
       return { ...s, step: 3, confirmed: true, error: '' };

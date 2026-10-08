@@ -1,9 +1,10 @@
 import type { PinView } from '@/lib/data/types';
 import { THEMES } from '@/lib/theme/themes';
 import { firstSegment } from '@/lib/text/address';
-import { loadGeocoder, loadGoogle } from './loader';
+import { reverseGeocode } from './geocode';
+import { loadGoogle } from './loader';
 import { GLYPHS, PROBES, pickGlyph } from './glyphs';
-import type { GeocodeCandidate, MapAdapter } from './types';
+import type { MapAdapter } from './types';
 
 export function createGoogleAdapter(): MapAdapter {
   let map: google.maps.Map | null = null;
@@ -127,23 +128,8 @@ export function createGoogleAdapter(): MapAdapter {
       };
       google.maps.event.addListenerOnce(m, 'idle', step);
     },
-    async reverseGeocode(p) {
-      const g = await loadGeocoder();
-      try {
-        const { results } = await g.geocode({ location: p });
-        return results.map(
-          (r): GeocodeCandidate => ({
-            placeId: r.place_id,
-            address: r.formatted_address,
-            lat: r.geometry.location.lat(),
-            lng: r.geometry.location.lng(),
-            types: r.types ?? [],
-          }),
-        );
-      } catch (e) {
-        if ((e as { code?: string }).code === 'ZERO_RESULTS') return [];
-        throw e;
-      }
+    reverseGeocode(p) {
+      return reverseGeocode(p, season);
     },
     setPins(pins) {
       pending = pins;

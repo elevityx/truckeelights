@@ -4,12 +4,14 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import Sheet from '@/components/ui/Sheet';
 import { XIcon } from '@/components/shell/Icons';
 import { mapsConfigured } from '@/config/public-env';
-import { DataError, toDataError, userMessage, type RegionContext } from '@/lib/data';
+import { DataError, toDataError, userMessage, type PinView, type RegionContext } from '@/lib/data';
 import { ensureAnonymousSession, hasSession, submitHouse } from '@/lib/data/submit';
+import { reverseGeocode } from '@/lib/maps/geocode';
+import { findNearbyDuplicate, mapPickMessage, pickStreetResult } from '@/lib/maps/mapPick';
 import { createAddressPicker, createPinConfirm } from '@/lib/maps/picker';
 import type { PickedPlace } from '@/lib/maps/types';
 import BotCheck from './BotCheck';
-import { BLOCKED_MESSAGE, initialState, reducer, type Step } from './flow';
+import { BLOCKED_MESSAGE, initialState, NUDGE_MESSAGE, reducer, type Step } from './flow';
 
 // Owner: WP-C
 export interface AddHouseSheetProps {
@@ -19,6 +21,8 @@ export interface AddHouseSheetProps {
   onOpenExisting(houseId: string): void;
   /** From a map tap: start at the pin step with this place. */
   initialPlace?: PickedPlace;
+  /** This season's houses, for the "already on the map" check after the pin moves. */
+  pins: readonly PinView[];
 }
 
 const STEPS = ['Find address', 'Confirm pin', 'Bot check'] as const;
@@ -27,7 +31,7 @@ function latlng(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, initialPlace }: AddHouseSheetProps) {
+export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, initialPlace, pins }: AddHouseSheetProps) {
   const [s, dispatch] = useReducer(reducer, initialPlace, (p) => (p ? reducer(initialState, { type: 'picked', place: p }) : initialState));
   const [token, setToken] = useState('');
   const [session, setSession] = useState<boolean | null>(null);
@@ -70,6 +74,30 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
       dispatch({ type: 'moved', lat, lng });
     });
   }, [s.step, s.place, region, season]);
+
+  // Pin dragged: look up the street address at the drop point (debounced; stale answers are dropped by seq).
+  const { seq: geoSeq, busy: geoBusy } = s.geo;
+  const dropRef = useRef({ lat: s.lat, lng: s.lng });
+  useEffect(() => {
+    dropRef.current = { lat: s.lat, lng: s.lng };
+  }, [s.lat, s.lng]);
+  useEffect(() => {
+    if (!geoBusy) return;
+    const p = dropRef.current;
+    const t = setTimeout(() => {
+      reverseGeocode(p, season)
+        .then((results) => {
+          const r = pickStreetResult(results, region, p);
+          if (r.ok) dispatch({ type: 'geocoded', seq: geoSeq, place: r.place });
+          else dispatch({ type: 'geocodeFailed', seq: geoSeq, message: r.reason === 'outside' ? mapPickMessage('outside', region.name) : NUDGE_MESSAGE });
+        })
+        .catch(() => dispatch({ type: 'geocodeFailed', seq: geoSeq, message: NUDGE_MESSAGE }));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [geoSeq, geoBusy, region, season]);
+
+  // A house already on the map at the current pin/address (UX only; the server dedupes too).
+  const dup = s.step === 2 && s.place && !s.geo.busy ? findNearbyDuplicate(pins, { ...s.place, address: s.address, lat: s.lat, lng: s.lng }) : null;
 
   // Step 3: ask for a session only now (lazy), skip the bot check when one exists.
   useEffect(() => {
@@ -176,6 +204,19 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
         <p className="coords">
           {latlng(s.lat, s.lng)} · {placed ? 'placed by you' : initialPlace ? 'where you tapped' : 'from the address'}
         </p>
+        <p className="geo-note" role="status">
+          {s.geo.busy ? 'Finding address…' : s.geo.note}
+        </p>
+        {dup && (
+          <div className="dupnote">
+            <span>
+              Already on the map: <strong>{dup.address}</strong>
+            </span>
+            <button type="button" className="btn ghost" onClick={() => onOpenExisting(dup.id)}>
+              View it
+            </button>
+          </div>
+        )}
         <label className="lbl" htmlFor="add-addr">
           Address as it will show
         </label>
@@ -187,11 +228,19 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
           value={s.address}
           onChange={(e) => dispatch({ type: 'setAddress', address: e.target.value })}
         />
+        {s.geo.undo !== null && (
+          <p className="fine undo">
+            Updated to match the pin.{' '}
+            <button type="button" className="linkbtn" onClick={() => dispatch({ type: 'undoAddress' })}>
+              Undo
+            </button>
+          </p>
+        )}
         <p className="err" role="alert">
           {s.error}
         </p>
         <div className="actions">
-          <button type="button" className="btn primary" onClick={() => dispatch({ type: 'confirm' })}>
+          <button type="button" className="btn primary" disabled={s.geo.busy} onClick={() => dispatch({ type: 'confirm' })}>
             Yes, that’s the house
           </button>
           <button type="button" className="btn ghost" onClick={() => dispatch({ type: 'goStep', step: 1 })}>

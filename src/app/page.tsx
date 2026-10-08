@@ -175,6 +175,7 @@ export default function HomePage() {
           key={addAt ? `at-${addAt.n}` : 'search'}
           ctx={ctx}
           initialPlace={addAt?.place}
+          pins={pins}
           onClose={() => setSheet(null)}
           onCreated={(id) => void reload(id)}
           onOpenExisting={(id) => select(id)}

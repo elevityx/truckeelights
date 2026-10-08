@@ -67,3 +67,47 @@ describe('add-house flow', () => {
     expect(reducer(done, { type: 'goStep', step: 1 })).toBe(done);
   });
 });
+
+describe('pin drag re-geocode', () => {
+  const moved = (s: FlowState) => reducer(s, { type: 'moved', lat: 39.331, lng: -120.181 });
+  const other = { placeId: 'ChIJotherplace1', address: '10020 Jibboom St, Truckee, CA 96161, USA', lat: 39.331, lng: -120.181, types: ['street_address'] };
+  it('a drag starts a lookup and blocks confirm until it lands', () => {
+    const s = moved(at2());
+    expect(s.geo.busy).toBe(true);
+    expect(reducer(s, { type: 'confirm' }).step).toBe(2);
+  });
+  it('the answer updates address and place id together and keeps the dropped point', () => {
+    const s1 = moved(at2());
+    const s = reducer(s1, { type: 'geocoded', seq: s1.geo.seq, place: other });
+    expect(s.address).toBe(other.address);
+    expect(s.place?.placeId).toBe(other.placeId);
+    expect([s.lat, s.lng]).toEqual([39.331, -120.181]);
+    expect(s.geo.busy).toBe(false);
+    expect(s.geo.undo).toBeNull(); // the user had not typed, so no Undo
+  });
+  it('ignores a stale answer from an earlier drag', () => {
+    const s1 = moved(at2());
+    const s2 = reducer(s1, { type: 'moved', lat: 39.332, lng: -120.182 });
+    const s = reducer(s2, { type: 'geocoded', seq: s1.geo.seq, place: other });
+    expect(s).toBe(s2);
+    expect(reducer(s2, { type: 'geocodeFailed', seq: s1.geo.seq, message: 'x' })).toBe(s2);
+  });
+  it('a failed lookup keeps the previous address and place, with a note', () => {
+    const s1 = moved(at2());
+    const s = reducer(s1, { type: 'geocodeFailed', seq: s1.geo.seq, message: 'nudge' });
+    expect(s.address).toBe(place.address);
+    expect(s.place?.placeId).toBe(place.placeId);
+    expect(s.geo).toMatchObject({ busy: false, note: 'nudge' });
+  });
+  it('edited text is replaced but can be restored with Undo', () => {
+    const typed = reducer(at2(), { type: 'setAddress', address: '10013 Jibboom Street, Truckee' });
+    const s1 = moved(typed);
+    const s = reducer(s1, { type: 'geocoded', seq: s1.geo.seq, place: other });
+    expect(s.address).toBe(other.address);
+    expect(s.geo.undo).toBe('10013 Jibboom Street, Truckee');
+    const u = reducer(s, { type: 'undoAddress' });
+    expect(u.address).toBe('10013 Jibboom Street, Truckee');
+    expect(u.geo.undo).toBeNull();
+    expect(u.edited).toBe(true);
+  });
+});
