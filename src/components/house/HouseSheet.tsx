@@ -3,6 +3,7 @@
 import Sheet from '@/components/ui/Sheet';
 import { publicEnv } from '@/config/public-env';
 import type { PinView, Season } from '@/lib/data/types';
+import { houseShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { firstSegment, restSegment } from '@/lib/text/address';
 import { DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
 
@@ -16,20 +17,11 @@ interface Props {
 
 export default function HouseSheet({ pin, season, year, onClose, onToast }: Props) {
   const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin.address)}`;
-  const url = `${publicEnv.siteUrl}/?house=${pin.id}`;
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
   const share = async () => {
-    try {
-      if (typeof navigator.share === 'function') {
-        await navigator.share({ url });
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      onToast('Link copied');
-    } catch {
-      /* share cancelled or clipboard blocked */
-    }
+    const msg = shareToast(await shareOrCopy(houseShareData(season, publicEnv.siteUrl, pin.id, firstSegment(pin.address)), navigator));
+    if (msg) onToast(msg);
   };
 
   return (
@@ -69,9 +61,9 @@ export default function HouseSheet({ pin, season, year, onClose, onToast }: Prop
               <DirIcon />
               Directions
             </a>
-            <button type="button" className="btn ghost" aria-label="Share a link to this house" onClick={share}>
+            <button type="button" className="btn primary" onClick={share}>
               <ShareIcon />
-              Share
+              Share this house
             </button>
           </div>
         </div>

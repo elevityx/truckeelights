@@ -13,12 +13,31 @@ const fraunces = Fraunces({
 });
 const atkinson = Atkinson_Hyperlegible_Next({ subsets: ['latin'], variable: '--font-atkinson', display: 'swap' });
 
+const SHARE_TITLE = 'Truckee Frights · Truckee Lights';
+const SHARE_DESCRIPTION = 'The community map of decorated houses in Truckee, CA. Find the spookiest (and brightest) houses in town, and add yours.';
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://truckeelights.com'),
   alternates: { canonical: '/' },
   title: 'Truckee Lights · Truckee Frights',
   description: 'A community map of decorated houses in Truckee, CA. Halloween and Christmas.',
   icons: '/favicon.ico',
+  // Static export: one site-wide card. `?house=` links share it too (no per-house OG without a server).
+  // public/og/christmas.png is the matching card for the Christmas season; swap the path when the season flips.
+  openGraph: {
+    type: 'website',
+    url: '/',
+    siteName: 'Truckee Lights',
+    title: SHARE_TITLE,
+    description: SHARE_DESCRIPTION,
+    images: [{ url: '/og/halloween.png', width: 1200, height: 630, alt: 'Truckee Frights: a spooky house map of Truckee, CA' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: SHARE_TITLE,
+    description: SHARE_DESCRIPTION,
+    images: ['/og/halloween.png'],
+  },
 };
 
 // resizes-content: Android Chrome shrinks the layout (and dvh) for the keyboard, so bottom sheets stay above it.
