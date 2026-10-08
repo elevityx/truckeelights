@@ -20,6 +20,14 @@ No Maps key? The List view still works.
 - `npm run db:test` (pgTAP, needs the local stack)
 - `npm run test:concurrency` (needs the local stack)
 
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please also see:
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md), [data model](docs/DATA_MODEL.md), and [decision log](docs/DECISIONS.md)
+
 ## License
 
 MIT
