@@ -20,6 +20,14 @@ export interface PickerOptions {
 }
 
 function focusIfIdle(target: HTMLElement, host: HTMLElement) {
+  // Wait a frame: a just-appended Google element ignores focus() until it has rendered its input.
+  setTimeout(() => {
+    if (!target.isConnected) return;
+    focusNow(target, host);
+  }, 120);
+}
+
+function focusNow(target: HTMLElement, host: HTMLElement) {
   const a = document.activeElement;
   const sheet = host.closest('[role="dialog"]');
   if (!a || a === document.body || (sheet && sheet.contains(a) && /^H[1-3]$/.test(a.tagName))) target.focus();
