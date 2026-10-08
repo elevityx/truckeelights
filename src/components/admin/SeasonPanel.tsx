@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { adminSetSeason, getRegionContext, toDataError, userMessage, type RegionContext, type Season } from '@/lib/data';
+import { adminSetSeason, getRegionContext, runStorageJobsFallback, toDataError, userMessage, type RegionContext, type Season } from '@/lib/data';
 import { applySeason } from '@/lib/theme/applySeason';
 import { SEASON_LABEL, isSameSeason, statusLine, switchConfirmText, toggleCopy, yearChoices } from './seasonState';
 
@@ -30,6 +30,7 @@ export default function SeasonPanel({ ctx, onCtx, onForbidden }: Props) {
     setToast(null);
     try {
       await adminSetSeason(ctx.region.id, season, year, open);
+      await runStorageJobsFallback(ctx.region.id).catch(() => undefined); // A.3: run cleanup now; the banner covers failures
       const fresh = await getRegionContext(ctx.region.slug);
       applySeason(fresh.season);
       onCtx(fresh);
