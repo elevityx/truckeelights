@@ -56,3 +56,15 @@
 .qr{background:#fff; padding:8px; border-radius:12px; width:200px; height:200px; align-self:center}
 .adm code{word-break:break-all; background:var(--bg); padding:2px 6px; border-radius:6px; border:1px solid var(--line)}
 .adm hr{border:0; border-top:1px solid var(--line); width:100%}
+.status-card,.switch-card{display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:var(--radius); background:var(--surface); border:1px solid var(--line)}
+.status-card{border-width:2px; border-color:var(--accent)}
+.status-card h3,.switch-card h3{margin:0; font-size:19px; line-height:1.3}
+.switch-card p{margin:0}
+.btn.big{min-height:52px; font-size:17px; width:100%}
+@media (min-width:600px){.btn.big{width:auto; align-self:flex-start; padding:0 28px}}
+.seg{display:flex; gap:6px; flex-wrap:wrap}
+.seg-b{flex:1 1 90px; min-height:44px; padding:0 14px; border-radius:10px; border:1.5px solid var(--line); background:var(--bg); color:var(--text); font-size:16px; font-weight:700; cursor:pointer}
+.seg-b[aria-checked="true"]{border-color:var(--accent); background:var(--accent); color:var(--on-accent)}
+.seg-b:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+.confirm .btn{min-height:44px}
+.toast{padding:12px 14px; border-radius:var(--radius); border:1.5px solid currentColor; background:var(--surface)}
