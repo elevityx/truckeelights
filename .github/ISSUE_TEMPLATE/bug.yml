@@ -1,0 +1,26 @@
+name: Bug report
+description: Something on the site or in the code is not working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not include secrets, and report security problems through the Security tab instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Device and browser
+      placeholder: iPhone 15, Safari 19
