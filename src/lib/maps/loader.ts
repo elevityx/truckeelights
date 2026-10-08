@@ -19,3 +19,18 @@ export function loadGoogle(): Promise<GoogleLibs> {
   }
   return promise;
 }
+
+let geocoder: Promise<google.maps.Geocoder> | null = null;
+
+/** Lazily loads the geocoding library (only when someone taps the map to add a house). */
+export function loadGeocoder(): Promise<google.maps.Geocoder> {
+  if (!geocoder) {
+    geocoder = loadGoogle()
+      .then(() => importLibrary('geocoding'))
+      .then((lib) => new lib.Geocoder());
+    geocoder.catch(() => {
+      geocoder = null; // allow a retry after a failed load
+    });
+  }
+  return geocoder;
+}

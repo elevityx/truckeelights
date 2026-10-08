@@ -6,13 +6,15 @@ interface Props {
   label: string;
   onClose(): void;
   children: ReactNode;
+  /** Phones: a tall sheet (top at 12dvh) so a text field near its top stays above the on-screen keyboard. */
+  tall?: boolean;
 }
 
 /**
  * Bottom sheet below 760px, 400px right panel at 760px and up, with a scrim on mobile.
  * Escape closes it; the first heading takes focus on open.
  */
-export default function Sheet({ label, onClose, children }: Props) {
+export default function Sheet({ label, onClose, children, tall = false }: Props) {
   const ref = useRef<HTMLElement>(null);
   // Keep the latest onClose without re-running the focus effect when a parent passes an inline closure.
   const onCloseRef = useRef(onClose);
@@ -44,7 +46,7 @@ export default function Sheet({ label, onClose, children }: Props) {
         ref={ref}
         role="dialog"
         aria-label={label}
-        className="fixed z-50 overflow-y-auto bg-[var(--panel,#17121f)] text-[var(--text,#f3eefa)] shadow-2xl inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl p-4 min-[760px]:inset-x-auto min-[760px]:top-0 min-[760px]:right-0 min-[760px]:bottom-0 min-[760px]:max-h-none min-[760px]:w-[400px] min-[760px]:rounded-none"
+        className={`fixed z-50 overflow-y-auto overscroll-contain bg-[var(--panel,#17121f)] text-[var(--text,#f3eefa)] shadow-2xl inset-x-0 bottom-0 ${tall ? 'top-[12dvh]' : 'max-h-[85dvh]'} rounded-t-2xl p-4 min-[760px]:inset-x-auto min-[760px]:top-0 min-[760px]:right-0 min-[760px]:bottom-0 min-[760px]:max-h-none min-[760px]:w-[400px] min-[760px]:rounded-none`}
       >
         {children}
       </aside>

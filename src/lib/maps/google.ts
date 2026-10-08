@@ -1,8 +1,9 @@
 import type { PinView } from '@/lib/data/types';
 import { THEMES } from '@/lib/theme/themes';
 import { firstSegment } from '@/lib/text/address';
+import { reverseGeocode } from './geocode';
 import { loadGoogle } from './loader';
-import { GLYPHS, pickGlyph } from './glyphs';
+import { GLYPHS, PROBES, pickGlyph } from './glyphs';
 import type { MapAdapter } from './types';
 
 export function createGoogleAdapter(): MapAdapter {
@@ -12,6 +13,10 @@ export function createGoogleAdapter(): MapAdapter {
   let season: 'halloween' | 'christmas' = 'halloween';
   const markers = new Map<string, { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; pin: PinView }>();
   const listeners = new Set<(id: string) => void>();
+  const clickListeners = new Set<(p: { lat: number; lng: number }) => void>();
+  let lastPinClick = 0; // a pin tap must never also count as an empty-map tap
+  let probe: google.maps.marker.AdvancedMarkerElement | null = null;
+  let zoomToken = 0;
   let selected: string | null = null;
   let pending: PinView[] | null = null;
   let dead = false;
@@ -49,7 +54,10 @@ export function createGoogleAdapter(): MapAdapter {
         content: el,
         title: pin.address,
       });
-      m.addListener('click', () => listeners.forEach((cb) => cb(pin.id)));
+      m.addListener('click', () => {
+        lastPinClick = Date.now();
+        listeners.forEach((cb) => cb(pin.id));
+      });
       markers.set(pin.id, { m, el, pin });
     });
   };
@@ -80,7 +88,48 @@ export function createGoogleAdapter(): MapAdapter {
           strictBounds: false,
         },
       });
+      // 'click' fires only for a tap that was not a drag or pinch; pins are filtered by lastPinClick.
+      map.addListener('click', (e: google.maps.MapMouseEvent) => {
+        const ll = e.latLng;
+        if (!ll || Date.now() - lastPinClick < 500) return;
+        const p = { lat: ll.lat(), lng: ll.lng() };
+        clickListeners.forEach((cb) => cb(p));
+      });
       if (pending) render(pending);
+    },
+    onMapClick(cb) {
+      clickListeners.add(cb);
+      return () => {
+        clickListeners.delete(cb);
+      };
+    },
+    showProbe(p) {
+      if (probe) probe.map = null;
+      probe = null;
+      if (!p || !map || !marker) return;
+      const el = document.createElement('div');
+      el.className = 'probe';
+      el.innerHTML = PROBES[season]; // constant SVG string, never data
+      probe = new marker.AdvancedMarkerElement({ map, position: p, content: el, zIndex: 1000 });
+    },
+    zoomTo(p, zoom) {
+      if (!map) return;
+      const m = map;
+      const token = ++zoomToken;
+      m.panTo(p);
+      // Step the zoom two levels per idle so the camera eases in instead of jumping.
+      const step = () => {
+        if (token !== zoomToken || !map) return;
+        const z = m.getZoom() ?? zoom;
+        if (z >= zoom) return;
+        google.maps.event.addListenerOnce(m, 'idle', step);
+        m.setZoom(Math.min(zoom, z + 2));
+        m.panTo(p);
+      };
+      google.maps.event.addListenerOnce(m, 'idle', step);
+    },
+    reverseGeocode(p) {
+      return reverseGeocode(p, season);
     },
     setPins(pins) {
       pending = pins;
@@ -105,6 +154,10 @@ export function createGoogleAdapter(): MapAdapter {
       for (const rec of markers.values()) rec.m.map = null;
       markers.clear();
       listeners.clear();
+      clickListeners.clear();
+      if (probe) probe.map = null;
+      probe = null;
+      zoomToken++;
       map = null;
       div?.remove();
       div = null;

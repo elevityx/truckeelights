@@ -8,6 +8,13 @@ export const GLYPHS = {
   wreath: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="19" r="12" fill="none" stroke="#2E8B57" stroke-width="7.5"/><circle cx="20" cy="19" r="12" fill="none" stroke="#174d30" stroke-width="1.2" stroke-dasharray="2 3"/><g class="bulbs"><circle cx="20" cy="7" r="1.8" fill="#F2C14E"/><circle cx="30.4" cy="13" r="1.8" fill="#ff5a5f"/><circle cx="30.4" cy="25" r="1.8" fill="#6fd3ff"/><circle cx="9.6" cy="25" r="1.8" fill="#F2C14E"/><circle cx="9.6" cy="13" r="1.8" fill="#7FD6A0"/></g><path d="M20 31l-7 7 1.2-8.2zM20 31l7 7-1.2-8.2z" fill="#E0393E"/><circle cx="20" cy="31" r="3" fill="#C62828"/></svg>',
 } as const;
 
+/** Temporary marker shown at a tapped spot while it is looked up. Constant strings, never data. */
+export const PROBES = {
+  halloween: GLYPHS.ghost,
+  christmas:
+    '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3v6" stroke="#c9d7ea" stroke-width="2"/><rect x="16" y="7" width="8" height="5" rx="1.5" fill="#F2C14E"/><circle cx="20" cy="24" r="13" fill="#C62828"/><path d="M8.5 21q11.5 5 23 0M8.5 27q11.5 5 23 0" stroke="#F2C14E" stroke-width="2.4" fill="none"/><circle cx="15" cy="18" r="3" fill="#fff" fill-opacity=".55"/></svg>',
+} as const;
+
 export type GlyphName = keyof typeof GLYPHS;
 
 /** Alternate glyph (ghost / wreath) for roughly one house in four, stable per id. */
