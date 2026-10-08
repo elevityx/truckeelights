@@ -1,8 +1,8 @@
 -- AC1, AC2, AC3: RLS everywhere, no write grants, column allowlist, private schema unreachable,
--- exact EXECUTE allowlist per API role.
+-- exact EXECUTE allowlist per API role. R2: photos, storage_jobs, private USAGE for authenticated only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(42);
+select plan(55);
 
 -- (1) RLS enabled on every table in public and private.
 select is(
@@ -13,7 +13,7 @@ select is(
 select is(
   (select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')),
-  8, 'exactly 8 tables exist in public + private (R1 schema; no photos/storage_jobs)');
+  10, 'exactly 10 tables exist in public + private (R1 + photos + storage_jobs)');
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname::text), '{}')
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -60,6 +60,12 @@ select ok(not has_any_column_privilege('anon', 'private.quota_events', 'SELECT')
 select ok(not has_any_column_privilege('authenticated', 'private.quota_events', 'SELECT'), 'authenticated cannot SELECT private.quota_events');
 select ok(not has_any_column_privilege('anon', 'private.blocked_terms', 'SELECT'), 'anon cannot SELECT private.blocked_terms');
 select ok(not has_any_column_privilege('authenticated', 'private.blocked_terms', 'SELECT'), 'authenticated cannot SELECT private.blocked_terms');
+select ok(not has_any_column_privilege('anon', 'private.storage_jobs', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'private.storage_jobs', 'SELECT'), 'no API role can SELECT private.storage_jobs');
+-- Amendment 1 (AC2): public.photos has NO grants and NO policies for anon/authenticated.
+select ok(not has_any_column_privilege('anon', 'public.photos', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'public.photos', 'SELECT'), 'no API role can SELECT any column of public.photos');
+select is((select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'photos'), 0, 'public.photos has no policies');
 
 -- (4) Omitted columns are unreadable; the readable set equals the grant list exactly.
 select is(
@@ -86,9 +92,9 @@ select is(
         'regions.center_lat', 'regions.center_lng', 'regions.country_code', 'regions.default_zoom',
         'regions.id', 'regions.is_active', 'regions.max_lat', 'regions.max_lng', 'regions.min_lat',
         'regions.min_lng', 'regions.name', 'regions.slug', 'regions.timezone',
-        'site_settings.active_season', 'site_settings.active_year', 'site_settings.region_id',
-        'site_settings.submissions_open', 'site_settings.updated_at'],
-  'anon readable columns equal the grant allowlist exactly');
+        'site_settings.active_season', 'site_settings.active_year', 'site_settings.photos_open',
+        'site_settings.region_id', 'site_settings.submissions_open', 'site_settings.updated_at'],
+  'anon readable columns equal the grant allowlist exactly (no photos column: Amendment 1)');
 select is(
   (select array_agg(format('%I.%I', c.relname, a.attname) order by c.relname, a.attname)
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -102,9 +108,9 @@ select is(
       and has_column_privilege('anon', c.oid, a.attnum, 'SELECT')),
   'authenticated readable columns equal anon readable columns');
 
--- (5) No USAGE (or CREATE) on the private schema.
+-- (5) Invariant 9 (amended): private USAGE for authenticated only (Storage policy helpers); anon has none.
 select ok(not has_schema_privilege('anon', 'private', 'USAGE'), 'anon has no USAGE on schema private');
-select ok(not has_schema_privilege('authenticated', 'private', 'USAGE'), 'authenticated has no USAGE on schema private');
+select ok(has_schema_privilege('authenticated', 'private', 'USAGE'), 'authenticated has USAGE on schema private (policy helpers)');
 select ok(not has_schema_privilege('anon', 'private', 'CREATE')
           and not has_schema_privilege('authenticated', 'private', 'CREATE'), 'no CREATE on schema private');
 select ok(not has_schema_privilege('anon', 'public', 'CREATE')
@@ -119,6 +125,8 @@ select throws_ok($$insert into private.quota_events (kind, uid, region_id) value
 select throws_ok('select * from private.blocked_terms', '42501', null, 'anon: select private.blocked_terms -> 42501');
 select throws_ok($$insert into private.blocked_terms (term) values ('zzanon')$$, '42501', null, 'anon: insert private.blocked_terms -> 42501');
 select throws_ok('select * from public.admins', '42501', null, 'anon: select public.admins -> 42501');
+select throws_ok('select id from public.photos', '42501', null, 'anon: select public.photos -> 42501');
+select throws_ok('select public.photo_sign_paths(gen_random_uuid())', '42501', null, 'anon: photo_sign_paths -> 42501');
 reset role;
 
 select set_config('request.jwt.claims',
@@ -132,6 +140,13 @@ select throws_ok('select * from private.blocked_terms', '42501', null, 'authenti
 select throws_ok($$insert into private.blocked_terms (term) values ('zzauth')$$, '42501', null, 'authenticated: insert private.blocked_terms -> 42501');
 select throws_ok('select * from public.admins', '42501', null, 'authenticated: select public.admins -> 42501');
 select throws_ok('select private.is_admin(null)', '42501', null, 'authenticated: calling a private function -> 42501');
+select throws_ok('select * from private.storage_jobs', '42501', null, 'authenticated (with private USAGE): select private.storage_jobs -> 42501');
+select throws_ok($$insert into private.storage_jobs (kind, bucket, object_name) values ('delete_public', 'photos', 'x')$$,
+                 '42501', null, 'authenticated: insert private.storage_jobs -> 42501');
+select throws_ok('select id, public_path from public.photos', '42501', null, 'authenticated: select public.photos -> 42501');
+select throws_ok($$update public.photos set status = 'approved'$$, '42501', null, 'authenticated: update public.photos -> 42501');
+select throws_ok('select public.photo_sign_paths(gen_random_uuid())', '42501', null, 'authenticated: photo_sign_paths -> 42501');
+select throws_ok('select private.run_storage_jobs(1, null)', '42501', null, 'authenticated: private.run_storage_jobs -> 42501');
 
 -- (9) Direct writes on houses fail with 42501.
 select throws_ok($$insert into public.houses (region_id, season, year, address, normalized_address, lat, lng, coord_source)
@@ -153,22 +168,37 @@ select is(
   (select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
-  array['public.admin_list_houses(uuid, text, text)',
+  array['public.admin_approve_photo(uuid, text)',
+        'public.admin_complete_storage_job(bigint)',
+        'public.admin_list_houses(uuid, text, text)',
+        'public.admin_photo_queue(uuid, text)',
+        'public.admin_reject_photo(uuid)',
         'public.admin_release_house(uuid)',
+        'public.admin_revoke_photo(uuid)',
         'public.admin_set_house_status(uuid, text, text)',
+        'public.admin_set_photos_open(uuid, boolean)',
         'public.admin_set_season(uuid, text, integer, boolean)',
+        'public.admin_storage_jobs(uuid)',
         'public.admin_whoami(uuid)',
+        'public.confirm_photo_upload(uuid)',
         'public.get_region_context(text)',
+        'public.reserve_photo(uuid)',
         'public.submit_house(text, text, text, double precision, double precision)'],
   'authenticated can execute exactly the allowlist');
 
--- (8) Nothing in private is executable by API roles.
+-- service_role executes the signer input; nothing else in public beyond the two lists above.
+select ok(has_function_privilege('service_role', 'public.photo_sign_paths(uuid)', 'EXECUTE'), 'service_role can execute photo_sign_paths');
+select ok(not has_function_privilege('anon', 'public.photo_sign_paths(uuid)', 'EXECUTE')
+          and not has_function_privilege('authenticated', 'public.photo_sign_paths(uuid)', 'EXECUTE'), 'anon/authenticated cannot execute photo_sign_paths');
+
+-- (8) In private, only the two Storage policy helpers are executable, and only by authenticated.
 select is(
   (select coalesce(array_agg(format('%s:%I.%I(%s)', r.role, n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%s:%I.%I(%s)', r.role, n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      cross join (values ('anon'), ('authenticated')) r(role)
     where n.nspname = 'private' and has_function_privilege(r.role, p.oid, 'EXECUTE')),
-  '{}'::text[], 'no private function is executable by anon or authenticated');
+  array['authenticated:private.photo_upload_allowed(text)', 'authenticated:private.storage_admin_ok(text, text)'],
+  'private EXECUTE allowlist: only the two policy helpers, only for authenticated');
 
 -- Every function in public and private pins search_path to empty, and only the intended ones are definers.
 select is(
@@ -181,9 +211,18 @@ select is(
   (select array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname))
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname in ('public', 'private') and p.prosecdef),
-  array['private.is_admin', 'private.lock_quota', 'private.take_quota',
-        'public.admin_list_houses', 'public.admin_release_house', 'public.admin_set_house_status',
-        'public.admin_set_season', 'public.admin_whoami', 'public.submit_house'],
+  array['private.admin_photo_region', 'private.enqueue_delete_public', 'private.enqueue_rotate',
+        'private.enqueue_storage_job', 'private.finish_storage_job', 'private.house_is_public',
+        'private.is_admin', 'private.lock_photo', 'private.lock_quota', 'private.photo_object_readable',
+        'private.photo_upload_allowed', 'private.purge_rehearsal', 'private.reconcile_storage',
+        'private.rotate_house_photos', 'private.run_storage_jobs', 'private.set_runner_secret',
+        'private.set_storage_runner', 'private.storage_admin_ok', 'private.storage_job_satisfied',
+        'private.storage_object_exists', 'private.sweep_photos', 'private.take_quota',
+        'public.admin_approve_photo', 'public.admin_complete_storage_job', 'public.admin_list_houses',
+        'public.admin_photo_queue', 'public.admin_reject_photo', 'public.admin_release_house',
+        'public.admin_revoke_photo', 'public.admin_set_house_status', 'public.admin_set_photos_open',
+        'public.admin_set_season', 'public.admin_storage_jobs', 'public.admin_whoami',
+        'public.confirm_photo_upload', 'public.photo_sign_paths', 'public.reserve_photo', 'public.submit_house'],
   'security definer functions are exactly the intended set');
 select is(
   (select coalesce(array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname)), '{}')

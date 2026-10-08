@@ -52,3 +52,22 @@ values ('00000000-0000-4000-a000-00000000ad01', 'email', '00000000-0000-4000-a00
         now(), now(), now());
 insert into public.admins (user_id, region_id, note)
 values ('00000000-0000-4000-a000-00000000ad01', null, 'local seed admin');
+
+-- R2: Truckee photo uploads open locally (hosted stays closed: the column defaults to false).
+update public.site_settings s set photos_open = true, updated_at = now()
+  from public.regions r where r.id = s.region_id and r.slug = 'truckee';
+
+-- R2: storage-test admin (fake credentials, local stack only; used only by tests/storage). Global admin.
+insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+                        raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                        confirmation_token, recovery_token, email_change_token_new, email_change)
+values ('00000000-0000-4000-a000-00000000ad02', '00000000-0000-0000-0000-000000000000',
+        'authenticated', 'authenticated', 'storage-admin@example.test',
+        extensions.crypt('local-storage-admin-pw', extensions.gen_salt('bf')), now(),
+        '{"provider":"email","providers":["email"]}', '{}', now(), now(), '', '', '', '');
+insert into auth.identities (user_id, provider, provider_id, identity_data, last_sign_in_at, created_at, updated_at)
+values ('00000000-0000-4000-a000-00000000ad02', 'email', '00000000-0000-4000-a000-00000000ad02',
+        '{"sub":"00000000-0000-4000-a000-00000000ad02","email":"storage-admin@example.test","email_verified":true}',
+        now(), now(), now());
+insert into public.admins (user_id, region_id, note)
+values ('00000000-0000-4000-a000-00000000ad02', null, 'local storage-test admin');
