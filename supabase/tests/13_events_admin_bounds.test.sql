@@ -30,7 +30,10 @@ exception when others then
 end $$;
 create function test_ab.claims(p_uid text, p_anon boolean, p_aal text) returns void language sql as $$
   select set_config('request.jwt.claims',
-    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal)::text, true)::text
+    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal,
+                      'amr', (case when p_aal = 'aal2' then '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'
+                       when p_anon then '[{"method":"anonymous","timestamp":1791564302}]'
+                       else '[{"method":"password","timestamp":1791564302}]' end)::json)::text, true)::text
 $$;
 create function test_ab.submit(p_title text, p_lat double precision, p_lng double precision) returns text
 language sql as $$

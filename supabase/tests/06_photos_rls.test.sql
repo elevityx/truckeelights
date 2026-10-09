@@ -85,7 +85,7 @@ reset role;
 
 -- ---------------------------------------------------------------- authenticated (has private USAGE): still denied
 select set_config('request.jwt.claims', json_build_object('sub', 'e6000000-0000-4000-a000-000000000001', 'role', 'authenticated',
-                  'is_anonymous', true, 'aal', 'aal1')::text, true);
+                  'is_anonymous', true, 'aal', 'aal1', 'amr', '[{"method":"anonymous","timestamp":1791564302}]'::json)::text, true);
 set local role authenticated;
 select throws_ok('select id, public_path from public.photos', '42501', null, 'authenticated: select photos -> 42501 (even own rows)');
 select throws_ok($$insert into public.photos (house_id, upload_path, reserved_until) values (gen_random_uuid(), 'x', now())$$, '42501', null, 'authenticated: insert photos -> 42501');

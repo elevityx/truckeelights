@@ -23,7 +23,7 @@ Because there is no server of ours, nothing in the browser can be trusted. Secur
 - Tables have **no write grants**. Public writes go only through a small set of `security definer` RPCs that validate input, derive the season and region on the server, and enforce rate limits.
 - Public reads use **column grants plus row-level security (RLS)**, so anonymous callers see only what a policy allows.
 - Internal helpers live in a `private` schema that is not exposed through the Data API, with deny-by-default `EXECUTE`. An ACL test pins the exact set of callable functions.
-- Admin actions require a non-anonymous session at **AAL2** (password plus TOTP) and a row in the `admins` table, checked inside each RPC.
+- Admin actions require a non-anonymous session at **AAL2** whose JWT `amr` has both a `password` and a `totp` entry (an email-code + TOTP session does not count) and a row in the `admins` table, checked inside each RPC.
 
 UI checks (button states, hidden controls) are conveniences only.
 

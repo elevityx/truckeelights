@@ -63,7 +63,7 @@ reset role;
 -- Authenticated (anonymous session) gets the same public view.
 insert into auth.users (id, aud, role, email) values ('b2000000-0000-4000-a000-0000000000a1', 'authenticated', 'authenticated', 'pr1@example.test');
 select set_config('request.jwt.claims',
-  json_build_object('sub', 'b2000000-0000-4000-a000-0000000000a1', 'role', 'authenticated', 'is_anonymous', true, 'aal', 'aal1')::text, true);
+  json_build_object('sub', 'b2000000-0000-4000-a000-0000000000a1', 'role', 'authenticated', 'is_anonymous', true, 'aal', 'aal1', 'amr', '[{"method":"anonymous","timestamp":1791564302}]'::json)::text, true);
 set local role authenticated;
 select results_eq('select id from public.houses',
   $$values ('b2000000-0000-4000-a000-000000000003'::uuid)$$,
