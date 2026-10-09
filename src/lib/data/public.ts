@@ -24,6 +24,13 @@ interface RawContext {
   wordmark: string;
   photos_open?: boolean;
   votes_open?: boolean;
+  events?: unknown;
+}
+
+/** A1: the "events" capability object. Missing (DB without events) -> undefined; never guessed. */
+export function eventsCapability(raw: unknown): { open: boolean } | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return { open: (raw as { open?: unknown }).open === true };
 }
 
 export async function getRegionContext(slug?: string): Promise<RegionContext> {
@@ -54,6 +61,8 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
       wordmark: c.wordmark,
       photosOpen: c.photos_open === true,
       votesOpen: c.votes_open === true,
+      // A1: a missing key means a DB without events; the client then never touches events.
+      events: eventsCapability(c.events),
     };
   } catch (e) {
     throw e instanceof DataError ? e : toDataError(e);

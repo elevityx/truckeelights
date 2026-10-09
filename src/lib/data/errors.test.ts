@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toDataError, userMessage } from './errors';
+import { eventUserMessage, toDataError, userMessage } from './errors';
 import { DataError } from './types';
 
 describe('toDataError', () => {
@@ -60,5 +60,49 @@ describe('userMessage', () => {
   });
   it('falls back to the default copy', () => {
     expect(userMessage(new DataError('unknown'))).toBe('Something went wrong. Try again.');
+  });
+});
+
+// Spec_Events A8: every code the event RPCs raise maps through CODES (one test per code).
+describe('event error codes', () => {
+  it.each([
+    'not_signed_in', 'region_not_found', 'submissions_closed', 'invalid_input', 'out_of_bounds', 'rate_limited',
+    'queue_full', 'exists', 'forbidden', 'not_found',
+  ])('maps a message equal to %s', (code) => {
+    expect(toDataError({ message: code, details: 'x' }).code).toBe(code);
+  });
+  it('keeps the field name of invalid_input', () => {
+    const e = toDataError({ message: 'invalid_input', details: 'starts_at' });
+    expect([e.code, e.detail]).toEqual(['invalid_input', 'starts_at']);
+  });
+});
+
+describe('eventUserMessage', () => {
+  it.each([
+    ['uid_hourly', "You've added a few events already. Try again in an hour."],
+    ['uid_daily', "That's the daily limit for adding events. Try again tomorrow."],
+    ['region_breaker', 'Lots of events are coming in right now. Try again in a few minutes.'],
+  ])('rate_limited %s', (detail, msg) => {
+    expect(eventUserMessage(new DataError('rate_limited', detail))).toBe(msg);
+  });
+  it.each([
+    ['queue_full', "We're catching up on reviews — try again later."],
+    ['submissions_closed', 'Event submissions open soon.'],
+    ['exists', 'Looks like this event is already listed.'],
+  ] as const)('has copy for %s', (code, msg) => {
+    expect(eventUserMessage(new DataError(code))).toBe(msg);
+  });
+  it('uses the region name for out_of_bounds', () => {
+    expect(eventUserMessage(new DataError('out_of_bounds'), 'Truckee')).toBe('That spot is outside the Truckee events area.');
+  });
+  it.each(['title', 'description', 'venue', 'address', 'place_id', 'coordinates', 'starts_at', 'ends_at', 'url',
+    'source_url', 'adults_only', 'transition', 'reason'])('has field copy for invalid_input %s', (field) => {
+    const msg = eventUserMessage(new DataError('invalid_input', field));
+    expect(msg).not.toBe('Check the event details and try again.');
+    expect(msg.length).toBeGreaterThan(10);
+  });
+  it('falls back for an unknown field and for shared codes', () => {
+    expect(eventUserMessage(new DataError('invalid_input', 'nope'))).toBe('Check the event details and try again.');
+    expect(eventUserMessage(new DataError('network'))).toBe(userMessage(new DataError('network')));
   });
 });
