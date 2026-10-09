@@ -11,9 +11,15 @@ export function pacificParts(now: Date): PacificParts {
   return { date: `${get('year')}-${get('month')}-${get('day')}`, hour: Number(get('hour')) % 24, weekday: get('weekday') };
 }
 
-/** The 18:07 Pacific slot. pg_cron fires at 01:07 and 02:07 UTC (PDT/PST); only the one that lands at 18:xx Pacific runs. */
+/** Pacific hours in which cron ticks do work: 18:07-19:57, every 10 minutes (bounded worker; later ticks resume). */
+export const SLOT_HOURS = [18, 19];
+
+/**
+ * The 18:07-19:57 Pacific slot. pg_cron fires every 10 minutes from 01:07 to 03:57 UTC to cover both PDT and PST; only
+ * the fires that land in 18:xx or 19:xx Pacific run, the rest return "not_due".
+ */
 export function dueKinds(now: Date): { date: string; kinds: ('daily' | 'weekly')[] } {
   const p = pacificParts(now);
-  if (p.hour !== 18) return { date: p.date, kinds: [] };
+  if (!SLOT_HOURS.includes(p.hour)) return { date: p.date, kinds: [] };
   return { date: p.date, kinds: p.weekday === 'Thu' ? ['daily', 'weekly'] : ['daily'] };
 }

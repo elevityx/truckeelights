@@ -1,5 +1,7 @@
-// Resend over plain fetch. Every send carries an Idempotency-Key (run_id:user_id), so a retry after a crash between
-// "Resend accepted" and "we recorded it" is deduplicated by Resend. Errors become short codes; provider text is dropped.
+// Resend over plain fetch. Every send carries the row's stored Idempotency-Key (digest:<public_id>:<window start>), so a
+// retry after a crash between "Resend accepted" and "we recorded it" is deduplicated by Resend (24 h). Errors become
+// short codes; provider text is dropped. An outcome where Resend MAY have accepted the email (timeout, network error,
+// 5xx) is `ambiguous`: the caller leaves the row `sending` so it is resumed later with the same key, never re-keyed.
 export interface OutgoingEmail {
   from: string;
   to: string;
@@ -8,7 +10,7 @@ export interface OutgoingEmail {
   text: string;
   headers?: Record<string, string>;
 }
-export type SendResult = { ok: true; id: string | null } | { ok: false; code: string };
+export type SendResult = { ok: true; id: string | null } | { ok: false; code: string; ambiguous?: boolean };
 export type Sleep = (ms: number) => Promise<void>;
 
 export const RESEND_URL = 'https://api.resend.com/emails';
@@ -35,7 +37,7 @@ export async function sendEmail(
         signal: AbortSignal.timeout(10_000),
       });
     } catch {
-      return { ok: false, code: 'network' };
+      return { ok: false, code: 'network', ambiguous: true };
     }
     if (res.ok) {
       let id: string | null = null;
@@ -49,6 +51,7 @@ export async function sendEmail(
       continue; // same idempotency key
     }
     await res.body?.cancel();
+    if (res.status >= 500) return { ok: false, code: `http_${res.status}`, ambiguous: true };
     return { ok: false, code: `http_${res.status}` };
   }
   return { ok: false, code: 'http_429' };

@@ -38,7 +38,11 @@ export default function PrivacyPage() {
           <li>Your email address, which only our sign-in system and outgoing emails use. It is never shown on the map or to admins in full.</li>
           <li>What you asked for: new houses, new events, or both, and daily or weekly.</li>
           <li>Which houses you manage, and any request you send to manage or remove a house, with your note.</li>
-          <li>A record of which digests were sent to your account, so nobody gets the same email twice.</li>
+          <li>A record of which digests were sent to your account, so we can avoid sending you the same digest twice.</li>
+          <li>
+            If you start from a device that already added a house, a one-way hash of your email (not the address itself), usable for
+            one hour, so that device’s houses can move to your account once you confirm the email.
+          </li>
         </ul>
         <p>
           We email only what you asked for. Every digest has a link to change or stop it, and email apps like Gmail show a one-tap
@@ -55,16 +59,24 @@ export default function PrivacyPage() {
         <p>We don’t sell or share your email, and there are no ads or tracking pixels in our emails.</p>
 
         <h2>How long we keep it</h2>
+        <ul>
+          <li>
+            Your email and choices: while your account or subscription exists. If you stop emails, we keep your choices so you can
+            start again.
+          </li>
+          <li>The email hash for linking a device’s houses: deleted within a day.</li>
+          <li>Records of which digests were sent: 60 days.</li>
+          <li>Requests to manage or remove a house: while they are open, then 180 days after they are decided.</li>
+        </ul>
         <p>
-          Your email and choices stay while your account or subscription exists. If you stop emails, we keep your choices so you
-          can start again. When you delete your account, we delete your email, your subscription and your requests right away;
-          houses you managed stay on the map with no manager.
+          When you delete your account, we delete your sign-in, email, subscription, requests and digest records right away, in
+          one step. Houses you managed stay on the map with no manager.
         </p>
 
         <h2>Delete your data</h2>
         <p>
-          Sign in on <Link href="/account/">My account</Link> and choose Delete my account. Or reply to any email from us and ask,
-          and we’ll do it for you.
+          Sign in on <Link href="/account/">My account</Link> with your email and choose Delete my account. Replying to one of
+          our emails doesn’t delete anything; the account page does it right away.
         </p>
       </div>
       <nav className="sb-foot" aria-label="More">

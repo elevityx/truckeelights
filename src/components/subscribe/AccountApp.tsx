@@ -11,6 +11,7 @@ import { pickGlyph } from '@/lib/maps/glyphs';
 import { applySeason } from '@/lib/theme/applySeason';
 import { powerKind } from '@/lib/votes/meter';
 import {
+  accountsAvailable,
   DELETE_WORD,
   deleteReady,
   draftFrom,
@@ -31,7 +32,7 @@ import { saveMessage, summary } from './flow';
 import { ByeGlyph, ChoicePicker, PageShell } from './parts';
 import './subscribe.css';
 
-type Phase = 'loading' | 'signin' | 'ready' | 'deleted' | 'error';
+type Phase = 'loading' | 'unavailable' | 'signin' | 'ready' | 'deleted' | 'error';
 
 export default function AccountApp() {
   const [api, setApi] = useState<SubscribeApi | null>(null);
@@ -64,14 +65,20 @@ export default function AccountApp() {
       const a = await subscribeApi();
       if (!live) return;
       setApi(a);
+      // C9 pages-first deploy: without the database's `subscribe` capability (an older database, or the context call
+      // failed) accounts do not exist yet. Make no auth or account calls at all.
+      let c: RegionContext | null = null;
       try {
-        const c = await a.regionContext();
-        if (!live) return;
+        c = await a.regionContext();
+      } catch {
+        c = null;
+      }
+      if (!live) return;
+      if (c) {
         applySeason(c.season);
         setCtx(c);
-      } catch {
-        /* the page still works without the season look */
       }
+      if (!accountsAvailable(c)) return setPhase('unavailable');
       await load(a);
     })();
     return () => {
@@ -94,6 +101,16 @@ export default function AccountApp() {
       <p className="sb-lede" role="status">
         Loading your account…
       </p>
+    );
+  } else if (phase === 'unavailable') {
+    body = (
+      <section className="sb-card">
+        <h2>Accounts aren’t available yet</h2>
+        <p className="m">Check back soon. The map works as usual.</p>
+        <Link className="btn primary" href="/">
+          Back to the map
+        </Link>
+      </section>
     );
   } else if (phase === 'error') {
     body = (

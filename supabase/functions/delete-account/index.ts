@@ -2,6 +2,9 @@
 // The user comes ONLY from the verified JWT (no body user id). Requires a non-anonymous session whose `amr` shows a
 // fresh email code or link sign-in (within 10 minutes). Admins are refused. Houses are never removed: owned houses become
 // unowned. The service-role key stays in function env. Logs only status codes.
+// Order: (1) a read-only check (admins refused), (2) auth.admin.deleteUser FIRST, where the database FKs remove the
+// subscription, claims, digest rows and links and unown houses in one step, (3) an idempotent cleanup for anything not
+// FK-covered. If (2) fails, nothing has changed and the person can simply try again.
 import { accountDb, serviceClient, type AccountDb } from '../_shared/db.ts';
 import { corsHeaders, json, siteUrl } from '../_shared/http.ts';
 
@@ -48,12 +51,24 @@ export async function handle(req: Request, deps: DeleteDeps): Promise<Response> 
   if (!user || !claims) return json(401, { error: 'not_signed_in' }, cors);
   if (claims.is_anonymous !== false) return json(401, { error: 'not_signed_in' }, cors);
   if (!isFresh(claims, Math.floor(deps.now().getTime() / 1000))) return json(403, { error: 'reauth_required' }, cors);
+  let check: 'ok' | 'forbidden' | 'gone';
   try {
-    if ((await deps.db.deleteAccount(user.id)) !== 'ok') return json(403, { error: 'forbidden' }, cors);
-    if (!(await deps.deleteAuthUser(user.id))) { console.error('502 delete'); return json(502, { error: 'unavailable' }, cors); }
+    check = await deps.db.checkDelete(user.id);
   } catch {
     console.error('502 rpc');
     return json(502, { error: 'unavailable' }, cors);
+  }
+  if (check === 'forbidden') return json(403, { error: 'forbidden' }, cors);
+  if (check === 'ok') {
+    let deleted = false;
+    try { deleted = await deps.deleteAuthUser(user.id); } catch { deleted = false; }
+    if (!deleted) { console.error('502 delete'); return json(502, { error: 'unavailable' }, cors); } // nothing changed
+  }
+  try {
+    await deps.db.cleanupDeleted(user.id);
+  } catch {
+    // The account is already gone and the FKs did the real work; the cleanup is belt and braces.
+    console.error('cleanup failed');
   }
   return json(200, { deleted: true }, cors);
 }

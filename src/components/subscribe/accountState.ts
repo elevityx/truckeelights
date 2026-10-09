@@ -1,5 +1,13 @@
 // Pure helpers for `/account/`: what each house card may do, claim notes and search, the prefs editor, delete.
-import type { DataErrorCode, MyAccount, OwnedHouse, PinView, Subscription, SubscriptionPrefs } from '@/lib/data/types';
+import type { DataErrorCode, MyAccount, OwnedHouse, PinView, RegionContext, Subscription, SubscriptionPrefs } from '@/lib/data/types';
+
+/**
+ * C9 pages-first deploy: `/account/` works only when the database reports the `subscribe` capability (open or not:
+ * existing accounts keep working when Subscribe is closed). No context, or no key, means no auth or account calls.
+ */
+export function accountsAvailable(ctx: RegionContext | null | undefined): boolean {
+  return ctx?.subscribe !== undefined && ctx.subscribe !== null;
+}
 
 export interface HouseView {
   pill: { text: string; tone: 'ok' | 'warn' | 'mute' };

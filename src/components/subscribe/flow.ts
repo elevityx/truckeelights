@@ -191,27 +191,64 @@ export function summary(c: SubscriptionPrefs): string {
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-export function saveChoices(store: () => Store, c: Choices): void {
+/** How long a Subscribe intent in sessionStorage stays usable by the confirm page. */
+export const INTENT_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * The Subscribe sheet's intent for the confirm page (B2): the choices, scoped to the address the code was sent to and
+ * to the Subscribe flow, with a timestamp. Written only by the Subscribe sheet; never by a plain sign-in.
+ */
+export interface SubscribeIntent {
+  choices: Choices;
+  /** Lowercased and trimmed. */
+  email: string;
+  createdAt: number;
+  origin: 'subscribe';
+}
+
+export function saveChoices(store: () => Store, c: Choices, email: string, now: number = Date.now()): void {
   try {
-    store().setItem(CHOICES_KEY, JSON.stringify({ h: c.houses, e: c.events, c: c.cadence, a: c.account }));
+    const intent: SubscribeIntent = {
+      choices: { houses: c.houses, events: c.events, cadence: c.cadence, account: c.account },
+      email: email.trim().toLowerCase(),
+      createdAt: now,
+      origin: 'subscribe',
+    };
+    store().setItem(CHOICES_KEY, JSON.stringify(intent));
   } catch {
     /* storage may be unavailable: the confirm page then asks again */
   }
 }
 
-/** Saved choices, or null when missing, unreadable, or not a valid set (at least one topic). */
-export function readChoices(store: () => Store): Choices | null {
+/** The stored intent when it is well-formed (any age, any email), else null. */
+export function readIntent(store: () => Store): SubscribeIntent | null {
   try {
     const raw = store().getItem(CHOICES_KEY);
     if (!raw) return null;
-    const o = JSON.parse(raw) as { h?: unknown; e?: unknown; c?: unknown; a?: unknown };
-    if (typeof o.h !== 'boolean' || typeof o.e !== 'boolean' || typeof o.a !== 'boolean') return null;
-    if (!o.h && !o.e) return null;
-    if (o.c !== 'daily' && o.c !== 'weekly') return null;
-    return { houses: o.h, events: o.e, cadence: o.c, account: o.a };
+    const o = JSON.parse(raw) as Partial<SubscribeIntent> & { choices?: Partial<Choices> };
+    const c = o.choices;
+    if (o.origin !== 'subscribe' || typeof o.email !== 'string' || !o.email || typeof o.createdAt !== 'number') return null;
+    if (!c || typeof c.houses !== 'boolean' || typeof c.events !== 'boolean' || typeof c.account !== 'boolean') return null;
+    if (!c.houses && !c.events) return null;
+    if (c.cadence !== 'daily' && c.cadence !== 'weekly') return null;
+    return { choices: { houses: c.houses, events: c.events, cadence: c.cadence, account: c.account }, email: o.email, createdAt: o.createdAt, origin: 'subscribe' };
   } catch {
     return null;
   }
+}
+
+/**
+ * The choices to apply after a sign-in confirm, or null. Applied only when the intent came from the Subscribe sheet,
+ * is under an hour old (and not from the future), and was made for the address that is now signed in. Anything that
+ * does not qualify is cleared, so a stale or foreign intent can never subscribe someone later.
+ */
+export function takeIntent(store: () => Store, sessionEmail: string | null, now: number = Date.now()): Choices | null {
+  const i = readIntent(store);
+  const email = (sessionEmail ?? '').trim().toLowerCase();
+  const age = i ? now - i.createdAt : Infinity;
+  const ok = i !== null && email !== '' && i.email === email && age >= -60_000 && age < INTENT_MAX_AGE_MS;
+  clearChoices(store);
+  return ok ? i.choices : null;
 }
 
 export function clearChoices(store: () => Store): void {
@@ -284,6 +321,16 @@ export function clearNext(store: () => Store): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * A plain sign-in (the account page): its emailed link lands on /account/ in this browser, and it never carries a
+ * Subscribe intent. Any intent left by an abandoned Subscribe attempt is dropped, so confirming this sign-in can
+ * never create a subscription.
+ */
+export function preparePlainSignIn(store: () => Store): void {
+  saveNext(store, '/account/');
+  clearChoices(store);
 }
 
 /** The link's own `next` when it is an allowed path, else the one this browser recorded, else null. */

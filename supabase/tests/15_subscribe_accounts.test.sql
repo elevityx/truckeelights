@@ -6,7 +6,7 @@
 -- events.approved_at, and the svc_* routines (service_role only; digest idempotency and cap; unsubscribe; delete).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(157);
+select plan(186);
 
 -- ---------------------------------------------------------------- fixtures (as postgres)
 delete from public.admins;
@@ -73,6 +73,11 @@ language sql as $$
           30.5, 30.5, 'admin', p_status::public.house_status, p_reason,
           case when p_status = 'released' then now() end, p_created_by)
   returning id
+$$;
+-- The expected provider key for a subscriber now: digest:<public_id>:<last_sent_through, ISO UTC with microseconds>.
+create function test_helpers.digest_key(p_uid uuid) returns text language sql as $$
+  select 'digest:' || s.public_id::text || ':' || to_char(s.last_sent_through at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+    from public.subscriptions s where s.user_id = p_uid
 $$;
 grant execute on all functions in schema test_helpers to anon, authenticated, service_role;
 
@@ -151,12 +156,12 @@ set local role authenticated;
 select is(test_helpers.err('select public.stop_subscription()'), 'ok', 'stop_subscription');
 select is((public.my_account() -> 'subscription' ->> 'status'), 'stopped', 'status stopped');
 reset role;
-select is((select token_version from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 2, 'stop bumps token_version (every emailed link dies)');
+select is((select token_version from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 1, 'stop does NOT bump token_version (a retried one-click stop stays recognisable)');
 select test_helpers.as_('alice');
 set local role authenticated;
 select is(public.set_subscription('subtown', true, true, 'daily') ->> 'status', 'active', 'resubscribe reactivates');
 reset role;
-select is((select token_version from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 3, 'resubscribe bumps token_version (B8)');
+select is((select token_version from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 2, 'resubscribe bumps token_version (B8): every older link dies');
 -- quota: 10 per account per day (5 used above: 3 ok + topics/cadence failures roll back? no: they fail before take_quota)
 select test_helpers.as_('alice');
 set local role authenticated;
@@ -177,9 +182,17 @@ select test_helpers.as_('anonA');
 set local role authenticated;
 select is(test_helpers.err($$select public.begin_house_link('not-an-email')$$), 'invalid_input/email', 'begin_house_link: bad email -> invalid_input/email');
 select is(test_helpers.err($$select public.begin_house_link('  Alice@Example.TEST ')$$), 'ok', 'anonymous: begin_house_link');
-select is(test_helpers.err($$select public.begin_house_link('alice@example.test')$$), 'ok', 'same email again refreshes the live link');
+select is(test_helpers.err($$select public.begin_house_link('alice@example.test')$$), 'ok', 'same email again is accepted (no new row)');
 reset role;
-select is((select count(*)::int from private.house_links where anon_uid = 'f5000000-0000-4000-a000-00000000000a'), 1, 'one live link (normalized email, refreshed not duplicated)');
+select is((select count(*)::int from private.house_links where anon_uid = 'f5000000-0000-4000-a000-00000000000a'), 1, 'one live link (normalized email, not duplicated)');
+-- The link ages; repeating begin_house_link never extends it (the one-hour authorization cannot be refreshed forever).
+update private.house_links set expires_at = now() + interval '10 minutes' where anon_uid = 'f5000000-0000-4000-a000-00000000000a';
+select test_helpers.as_('anonA');
+set local role authenticated;
+select is(test_helpers.err($$select public.begin_house_link('alice@example.test')$$), 'ok', 'repeat begin_house_link on a live link');
+reset role;
+select is((select expires_at = now() + interval '10 minutes' from private.house_links where anon_uid = 'f5000000-0000-4000-a000-00000000000a'),
+  true, 'a repeat does not extend the live link''s expiry');
 select test_helpers.as_('anonA');
 set local role authenticated;
 select is(test_helpers.err($$select public.begin_house_link('x1@example.test')$$), 'ok', 'second live link');
@@ -225,6 +238,30 @@ reset role;
 select ok((select owner_id is null from public.houses where id = current_setting('t.h8')::uuid)
           and (select owner_id is null from public.houses where id = current_setting('t.h5')::uuid),
           'claim_my_submissions never touches other creators'' houses');
+
+-- ---------------------------------------------------------------- submit_house ownership (signed-in adds are owned)
+select test_helpers.as_('bob');
+set local role authenticated;
+select set_config('t.sh1', (select s.house_id::text from public.submit_house('subtown', 'ChIJsubowned000001', '41 Ownedfixture Rd, Subtown, CA', 30.5, 30.5) s), true);
+reset role;
+select is((select (owner_id = 'f5000000-0000-4000-a000-000000000002' and owner_since is not null and created_by = owner_id)::text
+             from public.houses where id = current_setting('t.sh1')::uuid), 'true',
+  'submit_house by a signed-in (non-anonymous) account: owner_id = auth.uid(), owner_since set');
+select test_helpers.as_('anonB');
+set local role authenticated;
+select set_config('t.sh2', (select s.house_id::text from public.submit_house('subtown', 'ChIJsubowned000002', '42 Ownedfixture Rd, Subtown, CA', 30.5, 30.5) s), true);
+reset role;
+select is((select (owner_id is null and owner_since is null)::text from public.houses where id = current_setting('t.sh2')::uuid), 'true',
+  'submit_house by an anonymous session: unowned (linked later by complete_house_link)');
+select test_helpers.as_('bob');
+set local role authenticated;
+select is((select count(*)::int from jsonb_array_elements(public.my_account() -> 'houses') h where h ->> 'id' = current_setting('t.sh1')), 1,
+  'the signed-in add shows on My account at once');
+reset role;
+-- owner_since follows owner_id (trigger): clearing the owner clears owner_since, so the FK's SET NULL can never violate it.
+update public.houses set owner_id = null where id = current_setting('t.sh1')::uuid;
+select is((select owner_since is null from public.houses where id = current_setting('t.sh1')::uuid), true, 'owner_id -> null clears owner_since');
+delete from public.houses where id in (current_setting('t.sh1')::uuid, current_setting('t.sh2')::uuid);
 
 -- ---------------------------------------------------------------- my_account houses
 select test_helpers.as_('alice');
@@ -382,7 +419,7 @@ select test_helpers.as_('admin1');
 set local role authenticated;
 select is((select row(active, stopped, daily, weekly, houses, events)::text from public.admin_subscriber_counts(current_setting('t.r')::uuid)),
   '(1,0,1,0,1,1)', 'admin_subscriber_counts');
-select is((select row(sent, failed, cap, provider_daily_limit, cap_hit)::text from public.admin_digest_today()), '(0,0,50,100,f)', 'admin_digest_today before any run');
+select is((select row(sent, failed, cap, cap_hit)::text from public.admin_digest_today()), '(0,0,500,f)', 'admin_digest_today before any run (digest emails vs digest_daily_cap, default 500)');
 reset role;
 select test_helpers.as_('admin2');
 set local role authenticated;
@@ -431,11 +468,20 @@ select is(test_helpers.err($$select public.svc_digest_start('hourly', null)$$), 
 -- window_to is the run's start; move it forward so the 5-minute-old items are inside the window (the run started "now").
 reset role;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run')::uuid;
+select set_config('t.key1', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001'), true);
 set local role service_role;
-select is((select string_agg(email || '|' || house_total || '|' || event_total || '|' || (houses -> 0 ->> 'address') || '|' || (events -> 0 ->> 'title')
-                             || '|' || (idempotency_key = current_setting('t.run') || ':' || user_id::text)::text, ',')
-             from public.svc_digest_batch(current_setting('t.run')::uuid, 100)),
-  'alice@example.test|1|1|8 Sub St, Subtown|Fake Lantern Walk|true', 'svc_digest_batch: only daily subscribers with something new; idempotency key run:user');
+select set_config('t.b', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run')::uuid, 100) b), true);
+reset role;
+select is((select string_agg((e ->> 'email') || '|' || (e ->> 'house_total') || '|' || (e ->> 'event_total') || '|' || (e -> 'houses' -> 0 ->> 'address')
+                             || '|' || (e -> 'events' -> 0 ->> 'title'), ',') from json_array_elements(current_setting('t.b')::json) e),
+  'alice@example.test|1|1|8 Sub St, Subtown|Fake Lantern Walk', 'svc_digest_batch: only daily subscribers with something new');
+select is(current_setting('t.b')::json -> 0 ->> 'idempotency_key', current_setting('t.key1'),
+  'C8: the key is per content window: digest:<public_id>:<last_sent_through ISO>');
+select is(current_setting('t.b')::json -> 0 ->> 'run_id', current_setting('t.run'), 'the row belongs to this run');
+select is((select d.idempotency_key || '|' || (d.window_from = s.last_sent_through)::text from private.digest_sends d
+             join public.subscriptions s on s.user_id = d.user_id where d.run_id = current_setting('t.run')::uuid),
+  current_setting('t.key1') || '|true', 'the key and the window start are stored on the digest_sends row');
+set local role service_role;
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run')::uuid, 100)), 0, 'an in-flight (sending) row is not handed out twice');
 select is(public.svc_digest_mark(current_setting('t.run')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), true, 'svc_digest_mark ok');
 select is(public.svc_digest_mark(current_setting('t.run')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), false, 'a repeated mark is a no-op');
@@ -448,17 +494,19 @@ select is((select count(*)::int from public.svc_digest_batch(current_setting('t.
 select is((select row(sent, failed, cap_hit)::text from public.svc_digest_finish(current_setting('t.run')::uuid)), '(1,0,f)', 'svc_digest_finish counts');
 reset role;
 -- failure keeps the window; the cap stops the batch.
-update public.subscriptions set last_sent_through = now() - interval '1 hour';
+update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000001';
 update public.app_settings set digest_daily_cap = 1;
 set local role service_role;
 select set_config('t.run2', public.svc_digest_start('daily', '2026-10-21')::text, true);
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), 0, 'daily cap reached (1 sent today) -> nothing handed out');
 reset role;
 select ok((select cap_hit from private.digest_runs where run_id = current_setting('t.run2')::uuid), 'cap hit is recorded on the run');
-update public.app_settings set digest_daily_cap = 50;
+update public.app_settings set digest_daily_cap = 500;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run2')::uuid;
+select set_config('t.key2', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001'), true);
 set local role service_role;
-select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), 1, 'below the cap again -> handed out');
+select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), current_setting('t.key2'),
+  'below the cap again -> handed out with the window key');
 select is(public.svc_digest_mark(current_setting('t.run2')::uuid, 'f5000000-0000-4000-a000-000000000001', false, 'Provider said: <bad>'), true, 'svc_digest_mark failure');
 reset role;
 select is((select status || '|' || error_code from private.digest_sends where run_id = current_setting('t.run2')::uuid), 'failed|error', 'failed row keeps only a sanitized code');
@@ -470,27 +518,81 @@ select test_helpers.as_('admin1');
 set local role authenticated;
 select is((select row(sent, failed, cap_hit)::text from public.admin_digest_today()), '(1,1,t)', 'admin_digest_today reflects the day');
 reset role;
--- C8 (integration): the failed person is handed out again by the NEXT run, with that run's key; and a crash between
--- the provider call and the mark (a `sending` row older than 10 minutes) comes back with the SAME key.
+-- C8: the failed person is handed out again by the NEXT run with the SAME key (same content window).
 set local role service_role;
 select set_config('t.run3', public.svc_digest_start('daily', '2026-10-22')::text, true);
 reset role;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run3')::uuid;
 set local role service_role;
-select is((select string_agg(user_id::text || '|' || idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
-  'f5000000-0000-4000-a000-000000000001|' || current_setting('t.run3') || ':f5000000-0000-4000-a000-000000000001',
-  'C8: a failed row is retried on the next run (same window start, new run key)');
+select is((select string_agg(run_id::text || '|' || idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
+  current_setting('t.run3') || '|' || current_setting('t.key2'), 'C8: the next run retries a failed send with the same window key');
 reset role;
-update private.digest_sends set updated_at = now() - interval '11 minutes' where run_id = current_setting('t.run3')::uuid;
+-- A crash between the provider call and the mark: the row stays `sending`. Under 5 idle minutes it is in flight ...
+update private.digest_sends set updated_at = now() - interval '4 minutes' where run_id = current_setting('t.run3')::uuid;
 set local role service_role;
-select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
-  current_setting('t.run3') || ':f5000000-0000-4000-a000-000000000001',
-  'C8: a stale sending row (crash between send and mark) is handed out again with the same idempotency key');
+select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)), 0, 'an unresolved send idle < 5 min is in flight: not handed out');
+reset role;
+-- ... after 5 minutes the next cron tick resumes it with the same key.
+update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run3')::uuid;
+set local role service_role;
+select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)), current_setting('t.key2'),
+  'C8: a stale sending row (crash between send and mark) is resumed with the same idempotency key');
 reset role;
 select is((select attempts from private.digest_sends where run_id = current_setting('t.run3')::uuid), 2, 'C8: the retry is counted in attempts');
+-- Never resolved that evening: the NEXT DAY's run resumes the old row (its run, key and window), it never mints a new key.
+update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run3')::uuid;
 set local role service_role;
-select is(public.svc_digest_mark(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), true, 'C8: the retried row can be marked sent');
+select set_config('t.run4', public.svc_digest_start('daily', '2026-10-23')::text, true);
 reset role;
+update private.digest_runs set window_to = now() + interval '1 minute' where run_id = current_setting('t.run4')::uuid;
+set local role service_role;
+select set_config('t.b4', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run4')::uuid, 100) b), true);
+reset role;
+select is((select string_agg((e ->> 'run_id') || '|' || (e ->> 'idempotency_key') || '|' || ((e ->> 'window_to')::timestamptz = now())::text, ',')
+             from json_array_elements(current_setting('t.b4')::json) e),
+  current_setting('t.run3') || '|' || current_setting('t.key2') || '|true',
+  'C8: a later run resumes the unresolved row with ITS run id, key and window');
+select is((select count(*)::int from private.digest_sends where run_id = current_setting('t.run4')::uuid), 0, 'no new row (no new key) while a send is unresolved');
+set local role service_role;
+select is(public.svc_digest_mark(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), true, 'the resumed row is marked sent on its own run');
+reset role;
+select ok((select last_sent_through = now() from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'last_sent_through advances to the resumed row''s window');
+-- A fresh unresolved send blocks any new key; a stale one whose window no longer has content is closed (no_content).
+update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000001';
+set local role service_role;
+select set_config('t.run5', public.svc_digest_start('daily', '2026-10-24')::text, true);
+select set_config('t.run6', public.svc_digest_start('daily', '2026-10-25')::text, true);
+reset role;
+update private.digest_runs set window_to = now() where run_id in (current_setting('t.run5')::uuid, current_setting('t.run6')::uuid);
+set local role service_role;
+select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run5')::uuid, 100)), 1, 'run 5 claims alice');
+select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run6')::uuid, 100)), 0, 'run 6: alice has a fresh unresolved send -> nothing new for her');
+reset role;
+update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run5')::uuid;
+update public.subscriptions set last_sent_through = now() where user_id = 'f5000000-0000-4000-a000-000000000001';
+set local role service_role;
+select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run6')::uuid, 100)), 0, 'a stale send with no content left is not sent ...');
+reset role;
+select is((select status || '|' || error_code from private.digest_sends where run_id = current_setting('t.run5')::uuid), 'failed|no_content', '... it is closed as failed/no_content');
+-- The daily cap is one budget across run kinds: today's daily rows count against the weekly run.
+update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000002';
+select set_config('t.used', (select count(*)::text from private.digest_sends d
+                               where (d.status = 'sent' and d.sent_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')
+                                  or (d.status = 'sending' and d.updated_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')), true);
+update public.app_settings set digest_daily_cap = current_setting('t.used')::smallint;
+set local role service_role;
+select set_config('t.run7', public.svc_digest_start('weekly', '2026-10-22')::text, true);
+reset role;
+update private.digest_runs set window_to = now() where run_id = current_setting('t.run7')::uuid;
+set local role service_role;
+select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run7')::uuid, 100)), 0, 'weekly run: the daily sends already used the shared cap');
+reset role;
+update public.app_settings set digest_daily_cap = current_setting('t.used')::smallint + 1;
+set local role service_role;
+select is((select string_agg(user_id::text, ',') from public.svc_digest_batch(current_setting('t.run7')::uuid, 100)), 'f5000000-0000-4000-a000-000000000002',
+  'weekly run: one more unit of cap -> bob (weekly) is handed out');
+reset role;
+update public.app_settings set digest_daily_cap = 500;
 -- unsubscribe
 select set_config('t.pub', (select public_id::text from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), true);
 select set_config('t.ver', (select token_version::text from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), true);
@@ -501,16 +603,37 @@ select is((select count(*)::int from public.svc_unsubscribe_lookup(current_setti
 select is(public.svc_unsubscribe_set_prefs(current_setting('t.pub')::uuid, current_setting('t.ver')::int, false, true, 'weekly'), 'updated', 'svc_unsubscribe_set_prefs');
 select is(test_helpers.err($$select public.svc_unsubscribe_set_prefs('$$ || current_setting('t.pub') || $$', 1, false, false, 'weekly')$$), 'invalid_input/topics', 'set_prefs validates topics');
 select is(public.svc_unsubscribe_stop(current_setting('t.pub')::uuid, current_setting('t.ver')::int), 'stopped', 'svc_unsubscribe_stop');
-select is(public.svc_unsubscribe_stop(current_setting('t.pub')::uuid, current_setting('t.ver')::int), 'invalid', 'the same token again -> invalid (version bumped)');
--- delete account
-select is(test_helpers.err($$select public.svc_delete_account('f5000000-0000-4000-a000-0000000000d1')$$), 'forbidden', 'svc_delete_account refuses admins');
-select is(public.svc_delete_account('f5000000-0000-4000-a000-000000000001'), 2, 'svc_delete_account unowns alice''s houses (h1, h5)');
+select is(public.svc_unsubscribe_stop(current_setting('t.pub')::uuid, current_setting('t.ver')::int), 'already_stopped', 'the same token again (provider retry) -> already_stopped');
+select is(public.svc_unsubscribe_stop(current_setting('t.pub')::uuid, current_setting('t.ver')::int - 1), 'invalid', 'an older version -> invalid');
+select is((select status from public.svc_unsubscribe_lookup(current_setting('t.pub')::uuid, current_setting('t.ver')::int)), 'stopped', 'the link still reads the stopped subscription');
+select is(public.svc_unsubscribe_set_prefs(current_setting('t.pub')::uuid, current_setting('t.ver')::int, true, true, 'daily'), 'invalid', 'prefs cannot change a stopped subscription');
 reset role;
+select is((select token_version::text from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), current_setting('t.ver'), 'stopping did not bump token_version');
+-- delete account: check (admins refused, nothing changes) -> Auth delete (FKs) -> idempotent cleanup
+insert into private.house_links (email_hash, anon_uid, expires_at, used_at, used_by)
+  values (private.email_hash('x9@example.test'), 'f5000000-0000-4000-a000-00000000000b', now(), now(), 'f5000000-0000-4000-a000-000000000001');
+set local role service_role;
+select is(public.svc_delete_account_check('f5000000-0000-4000-a000-0000000000d1'), 'forbidden', 'svc_delete_account_check refuses admins');
+select is(public.svc_delete_account_check('f5000000-0000-4000-a000-000000000001'), 'ok', 'svc_delete_account_check: a normal account -> ok');
+select is(test_helpers.err($$select public.svc_delete_account('f5000000-0000-4000-a000-000000000001')$$), 'invalid_input/user_exists',
+  'svc_delete_account never runs while the auth user exists (it can never strip a live account)');
+reset role;
+select is((select count(*)::int from public.houses where owner_id = 'f5000000-0000-4000-a000-000000000001'), 2, 'before: alice owns h1 and h5');
+select ok(exists (select 1 from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'before: alice has a subscription');
+delete from auth.users where id = 'f5000000-0000-4000-a000-000000000001';   -- what auth.admin.deleteUser does
 select ok(not exists (select 1 from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001')
           and not exists (select 1 from public.house_claims where user_id = 'f5000000-0000-4000-a000-000000000001')
-          and not exists (select 1 from public.houses where owner_id = 'f5000000-0000-4000-a000-000000000001'),
-  'subscription and claims deleted; houses stay, unowned');
+          and not exists (select 1 from private.digest_sends where user_id = 'f5000000-0000-4000-a000-000000000001')
+          and not exists (select 1 from private.house_links where used_by = 'f5000000-0000-4000-a000-000000000001'),
+  'the Auth delete alone removes the subscription, claims, digest rows and link use (FK cascade / set null)');
+select ok((select bool_and(owner_id is null and owner_since is null) from public.houses
+            where id in (current_setting('t.h1')::uuid, current_setting('t.h5')::uuid)),
+  'owned houses are unowned by the FK (owner_since cleared by the trigger, no check violation)');
 select is((select status::text from public.houses where id = current_setting('t.h5')::uuid), 'visible', 'deleting an account never removes a house (C4)');
+set local role service_role;
+select is(public.svc_delete_account_check('f5000000-0000-4000-a000-000000000001'), 'gone', 'after the Auth delete: gone');
+select is(public.svc_delete_account('f5000000-0000-4000-a000-000000000001'), 0, 'the cleanup is idempotent and finds nothing left');
+reset role;
 
 select * from finish();
 rollback;

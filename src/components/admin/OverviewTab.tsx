@@ -108,12 +108,12 @@ export default function OverviewTab({ ctx, onForbidden }: Props) {
       </dl>
       <div className="qcard">
         <div className="ov-use">
-          <b>Emails sent today</b>
-          <span>{digest ? `${digest.sent} of ${digest.providerDailyLimit}` : '–'}</span>
+          <b>Digest emails today</b>
+          <span>{digest ? `${digest.sent} of ${digest.cap}` : '–'}</span>
         </div>
         <div className={`ov-bar ${level === 'ok' ? '' : level}`} aria-hidden="true"><i style={{ width: `${digest ? usagePercent(digest) : 0}%` }} /></div>
         <p className="fine">
-          The digest stops at {digest ? digest.cap : 50} a day so sign-in emails keep room. That is best effort: sign-in mail shares the same daily limit.
+          The digest stops at its daily cap ({digest ? digest.cap : 500}) and sends the rest the next evening. Sign-in emails aren&apos;t counted here.
         </p>
       </div>
       <p className="fine">Counts only. There is no subscriber list in admin, by design.</p>

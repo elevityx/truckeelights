@@ -41,14 +41,15 @@ Deno.test('events show Pacific time, and footer carries the unsubscribe and pref
   assertEquals(subjectFor({ houses: [], events: [], housesTotal: 1, eventsTotal: 2 }), 'Truckee Lights: 1 new house and 2 new events');
 });
 
-Deno.test('dueKinds: only the 18:xx Pacific slot runs, Thursday adds weekly', () => {
+Deno.test('dueKinds: only the 18:xx-19:xx Pacific slot runs, Thursday adds weekly', () => {
   // 2026-12-04 is a Friday. 02:07Z Dec 5 = 18:07 PST Friday Dec 4.
   assertEquals(dueKinds(new Date('2026-12-05T02:07:00Z')), { date: '2026-12-04', kinds: ['daily'] });
-  assertEquals(dueKinds(new Date('2026-12-05T01:07:00Z')).kinds, []); // 17:07 PST: the PDT-slot job is off in winter
+  assertEquals(dueKinds(new Date('2026-12-05T01:07:00Z')).kinds, []); // 17:07 PST: before the slot in winter
   // Thursday 2026-12-03, 18:07 PST.
   assertEquals(dueKinds(new Date('2026-12-04T02:07:00Z')), { date: '2026-12-03', kinds: ['daily', 'weekly'] });
-  // Summer (PDT): 01:07Z is 18:07 Pacific.
+  // Summer (PDT): 01:07Z is 18:07 Pacific, 02:57Z is 19:57, 03:07Z is 20:07 (after the slot).
   assertEquals(dueKinds(new Date('2026-07-10T01:07:00Z')).kinds, ['daily', 'weekly']); // Thursday Jul 9
-  assertEquals(dueKinds(new Date('2026-07-10T02:07:00Z')).kinds, []);
+  assertEquals(dueKinds(new Date('2026-07-10T02:57:00Z')).kinds, ['daily', 'weekly']);
+  assertEquals(dueKinds(new Date('2026-07-10T03:07:00Z')).kinds, []);
   assertEquals(pacificParts(new Date('2026-12-05T08:30:00Z')).hour, 0);
 });

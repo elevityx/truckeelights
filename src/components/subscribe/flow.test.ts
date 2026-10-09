@@ -13,7 +13,8 @@ import {
   markHouseAdded,
   nextFor,
   parseConfirm,
-  readChoices,
+  INTENT_MAX_AGE_MS,
+  readIntent,
   readNext,
   reducer,
   resendLeft,
@@ -22,6 +23,8 @@ import {
   saveNext,
   sendCode,
   summary,
+  takeIntent,
+  preparePlainSignIn,
   type Choices,
   type FlowApi,
   type SheetState,
@@ -180,23 +183,62 @@ describe('finishSubscription (after verify)', () => {
   });
 });
 
-describe('choices storage', () => {
-  it('round-trips and rejects junk', () => {
+describe('Subscribe intent (choices for the confirm page)', () => {
+  const c: Choices = { houses: false, events: true, cadence: 'daily', account: false };
+  const T = 1_800_000_000_000;
+  it('stores choices + lowercased email + createdAt + origin, and rejects junk', () => {
     const st = memStore();
-    expect(readChoices(st)).toBeNull();
-    const c: Choices = { houses: false, events: true, cadence: 'daily', account: false };
-    saveChoices(st, c);
-    expect(readChoices(st)).toEqual(c);
-    st().setItem(CHOICES_KEY, '{"h":false,"e":false,"c":"daily","a":true}');
-    expect(readChoices(st)).toBeNull();
-    st().setItem(CHOICES_KEY, '{"h":true,"e":true,"c":"hourly","a":true}');
-    expect(readChoices(st)).toBeNull();
+    expect(readIntent(st)).toBeNull();
+    saveChoices(st, c, '  Alice@Example.COM ', T);
+    expect(readIntent(st)).toEqual({ choices: c, email: 'alice@example.com', createdAt: T, origin: 'subscribe' });
+    st().setItem(CHOICES_KEY, JSON.stringify({ choices: { ...c, houses: false, events: false }, email: 'a@b.co', createdAt: T, origin: 'subscribe' }));
+    expect(readIntent(st)).toBeNull();
+    st().setItem(CHOICES_KEY, JSON.stringify({ choices: { ...c, cadence: 'hourly' }, email: 'a@b.co', createdAt: T, origin: 'subscribe' }));
+    expect(readIntent(st)).toBeNull();
+    st().setItem(CHOICES_KEY, JSON.stringify({ choices: c, email: 'a@b.co', createdAt: T, origin: 'signin' }));
+    expect(readIntent(st)).toBeNull();
+    st().setItem(CHOICES_KEY, '{"h":true,"e":true,"c":"daily","a":true}'); // the old unscoped shape
+    expect(readIntent(st)).toBeNull();
     st().setItem(CHOICES_KEY, 'nope');
-    expect(readChoices(st)).toBeNull();
+    expect(readIntent(st)).toBeNull();
+  });
+  it('applies only a fresh intent for the signed-in address, and clears it after use', () => {
+    const st = memStore();
+    saveChoices(st, c, 'alice@example.com', T);
+    expect(takeIntent(st, 'ALICE@example.com', T + 5 * 60_000)).toEqual(c);
+    expect(st().getItem(CHOICES_KEY)).toBeNull();
+    expect(takeIntent(st, 'alice@example.com', T + 5 * 60_000)).toBeNull(); // used once
+  });
+  it('a different signed-in address never gets it, and the mismatch clears it', () => {
+    const st = memStore();
+    saveChoices(st, c, 'alice@example.com', T);
+    expect(takeIntent(st, 'bob@example.com', T + 1000)).toBeNull();
+    expect(st().getItem(CHOICES_KEY)).toBeNull();
+    saveChoices(st, c, 'alice@example.com', T);
+    expect(takeIntent(st, null, T + 1000)).toBeNull(); // no signed-in email (e.g. a stale anonymous session)
+    expect(st().getItem(CHOICES_KEY)).toBeNull();
+  });
+  it('an intent an hour old (or from the future) is stale: cleared, not applied', () => {
+    const st = memStore();
+    saveChoices(st, c, 'alice@example.com', T);
+    expect(takeIntent(st, 'alice@example.com', T + INTENT_MAX_AGE_MS)).toBeNull();
+    expect(st().getItem(CHOICES_KEY)).toBeNull();
+    saveChoices(st, c, 'alice@example.com', T + 10 * 60_000);
+    expect(takeIntent(st, 'alice@example.com', T)).toBeNull();
+    saveChoices(st, c, 'alice@example.com', T);
+    expect(takeIntent(st, 'alice@example.com', T + INTENT_MAX_AGE_MS - 1)).toEqual(c);
+  });
+  it('a plain sign-in drops any Subscribe intent, so its confirm can never subscribe', () => {
+    const st = memStore();
+    saveChoices(st, c, 'alice@example.com', T); // an abandoned Subscribe attempt in this tab
+    preparePlainSignIn(st);
+    expect(st().getItem(NEXT_KEY)).toBe('/account/');
+    expect(takeIntent(st, 'alice@example.com', T + 1000)).toBeNull();
   });
   it('survives storage that throws', () => {
-    expect(() => saveChoices(throwing, initialSheet(true).choices)).not.toThrow();
-    expect(readChoices(throwing)).toBeNull();
+    expect(() => saveChoices(throwing, initialSheet(true).choices, 'a@b.co')).not.toThrow();
+    expect(readIntent(throwing)).toBeNull();
+    expect(takeIntent(throwing, 'a@b.co')).toBeNull();
     expect(deviceAddedHouse(throwing)).toBe(false);
   });
   it('remembers that this device added a house', () => {

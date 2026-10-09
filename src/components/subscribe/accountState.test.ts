@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { MyAccount, OwnedHouse, PinView } from '@/lib/data/types';
+import type { MyAccount, OwnedHouse, PinView, RegionContext } from '@/lib/data/types';
 import {
+  accountsAvailable,
   deleteReady,
   draftFrom,
   houseView,
@@ -109,5 +110,18 @@ describe('misc', () => {
     expect(ownerActionMessage('rate_limited')).toMatch(/tomorrow/);
     expect(ownerActionMessage('claim_pending')).toMatch(/already/);
     expect(ownerActionMessage('unknown')).toMatch(/went wrong/);
+  });
+});
+
+describe('accountsAvailable (the /account/ capability gate)', () => {
+  const base = { region: { id: 'r', slug: 'truckee' } } as unknown as RegionContext;
+  it('no context or no subscribe key -> unavailable (no auth or account calls)', () => {
+    expect(accountsAvailable(null)).toBe(false);
+    expect(accountsAvailable(undefined)).toBe(false);
+    expect(accountsAvailable(base)).toBe(false);
+  });
+  it('the key present -> available, whether Subscribe is open or closed', () => {
+    expect(accountsAvailable({ ...base, subscribe: { open: true } })).toBe(true);
+    expect(accountsAvailable({ ...base, subscribe: { open: false } })).toBe(true);
   });
 });

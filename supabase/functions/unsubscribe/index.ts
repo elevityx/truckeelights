@@ -47,8 +47,10 @@ export async function handle(req: Request, deps: UnsubDeps): Promise<Response> {
 
   try {
     if (action === 'stop') {
+      // Idempotent: a provider retry of the same one-click POST (or a second tap) gets 200 "already stopped".
       const r = await deps.db.stop(claims.publicId, claims.version);
-      return r === 'stopped' ? json(200, { status: 'stopped' }, cors) : json(410, { error: 'token_invalid' }, cors);
+      if (r === 'invalid') return json(410, { error: 'token_invalid' }, cors);
+      return json(200, { status: r }, cors);
     }
     if (claims.purpose !== 'prefs') return json(403, { error: 'forbidden' }, cors); // preferences need a prefs link
     if (action === 'get') {

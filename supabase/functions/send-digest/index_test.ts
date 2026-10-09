@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertStringIncludes } from '@std/assert';
 import type { DigestDb, DigestRecipient, RunTotals } from '../_shared/db.ts';
-import { runDigest, type RunConfig } from '../_shared/digestRun.ts';
-import { sendEmail } from '../_shared/resend.ts';
+import { BUDGET_MS, MAX_SENDS, runDigest, type RunConfig } from '../_shared/digestRun.ts';
+import { dueKinds } from '../_shared/pacific.ts';
+import { sendEmail, type OutgoingEmail, type SendResult } from '../_shared/resend.ts';
 import { verifyToken } from '../_shared/token.ts';
 import { handle, type DigestEnv } from './index.ts';
 
@@ -9,50 +10,77 @@ const RUN = '99999999-0000-4000-8000-000000000001';
 const RUN2 = '99999999-0000-4000-8000-000000000002';
 const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = new Date('2026-12-05T02:07:00Z'); // 18:07 PST, a Friday
+const WINDOW_FROM = '2026-12-04T02:07:00.000000Z';
+const WINDOW_TO = '2026-12-05T02:07:00Z';
+
+/** A mutable clock shared by the config and the fake database. */
+function clock(start = NOW.getTime()) {
+  const c = { t: start, now: () => new Date(c.t), advance: (ms: number) => { c.t += ms; } };
+  return c;
+}
 
 const cfg = (over: Partial<RunConfig> = {}): RunConfig => ({
   siteUrl: 'https://example.test', functionsUrl: 'https://fn.example.test/functions/v1', from: 'Test <t@example.test>',
   hmacSecret: 'hmac-test', resendKey: 're_test', paceMs: 0, now: () => NOW, ...over,
 });
 
-// A row exactly as svc_digest_batch returns it (minus the run-specific idempotency key, which the fake fills in).
-const recipient = (n: number, withContent = true): Omit<DigestRecipient, 'idempotency_key'> => ({
+type Row = Omit<DigestRecipient, 'idempotency_key' | 'run_id' | 'window_to'> & { window_from: string };
+// A subscriber as svc_digest_batch sees it (the key, run and window are filled in by the fake, as the SQL does).
+const recipient = (n: number, withContent = true): Row => ({
   user_id: uid(n), email: `person${n}@example.test`, public_id: uid(1000 + n), token_version: 2,
   region_slug: 'truckee', region_name: 'Truckee', timezone: 'America/Los_Angeles', cadence: 'daily',
   houses: withContent ? [{ id: uid(5000 + n), address: `${n} Pine St` }] : [], house_total: withContent ? 1 : 0,
-  events: [], event_total: 0,
+  events: [], event_total: 0, window_from: WINDOW_FROM,
 });
+const keyOf = (n: number) => `digest:${uid(1000 + n)}:${WINDOW_FROM}`;
 
 type Status = 'sending' | 'sent' | 'failed';
+interface Entry { run: string; user: string; status: Status; attempts: number; key: string; windowTo: string; touched: number }
 interface Fake extends DigestDb {
   runId: string;
+  windowTo: string;
   cap: number;
-  /** Sends counted against today's cap (sent + sending), like the SQL's v_room. */
-  ledger: Map<string, { status: Status; attempts: number }>;
+  ledger: Map<string, Entry>;
   advanced: Set<string>; // users whose last_sent_through moved
   marks: string[];
   capHit: boolean;
 }
 
 /**
- * Mirrors the SQL contract of svc_digest_* (20261016000200): batch returns only users with no sent/failed row in this
- * run and no in-flight claim, claims them as `sending`, and stops at the cap (setting cap_hit); mark changes only a
- * `sending` row and advances last_sent_through only on ok.
+ * Mirrors the SQL contract of svc_digest_* (20261016000200):
+ *  - batch resumes, first, any user's `sending` row (any run) idle for 5 minutes, with that row's run, key and window;
+ *  - then claims people with content, no unresolved send and no row in this run, with key digest:<public_id>:<window start>;
+ *  - stops at the cap (sent + sending today), setting cap_hit;
+ *  - mark changes only a `sending` row and advances last_sent_through only on ok.
  */
-function fakeDb(rows: Omit<DigestRecipient, 'idempotency_key'>[], opts: { cap?: number; runId?: string; sentToday?: number } = {}): Fake {
+function fakeDb(rows: Row[], c: { now: () => Date }, opts: { cap?: number; sentToday?: number } = {}): Fake {
   const f: Fake = {
-    runId: opts.runId ?? RUN, cap: opts.cap ?? 50, ledger: new Map(), advanced: new Set(), marks: [], capHit: false,
+    runId: RUN, windowTo: WINDOW_TO, cap: opts.cap ?? 500, ledger: new Map(), advanced: new Set(), marks: [], capHit: false,
     start: () => Promise.resolve(f.runId),
     batch(run, limit) {
+      const now = c.now().getTime();
       const usedToday = (opts.sentToday ?? 0) + [...f.ledger.values()].filter((l) => l.status !== 'failed').length;
       const room = Math.max(0, Math.min(limit, 100, f.cap - usedToday));
       const out: DigestRecipient[] = [];
+      const open = (u: string) => [...f.ledger.values()].find((l) => l.user === u && l.status === 'sending');
+      const resumes: { row: Row; resume?: Entry }[] = [];
+      const fresh: { row: Row; resume?: Entry }[] = [];
       for (const r of rows) {
+        const o = open(r.user_id);
+        if (o) { if (now - o.touched >= 5 * 60_000) resumes.push({ row: r, resume: o }); continue; }
         if (r.house_total + r.event_total === 0 || f.advanced.has(r.user_id)) continue;
-        if (f.ledger.has(`${run}:${r.user_id}`)) continue; // sent, failed, or in flight
+        if (f.ledger.has(`${run}:${r.user_id}`)) continue; // sent or failed in this run
+        fresh.push({ row: r });
+      }
+      for (const { row: r, resume } of [...resumes, ...fresh]) {
         if (out.length >= room) { f.capHit = true; break; }
-        f.ledger.set(`${run}:${r.user_id}`, { status: 'sending', attempts: 1 });
-        out.push({ ...r, idempotency_key: `${run}:${r.user_id}` });
+        let e = resume;
+        if (e) { e.attempts++; e.touched = now; } else {
+          e = { run, user: r.user_id, status: 'sending', attempts: 1, key: `digest:${r.public_id}:${r.window_from}`, windowTo: f.windowTo, touched: now };
+          f.ledger.set(`${run}:${r.user_id}`, e);
+        }
+        const { window_from: _w, ...rest } = r;
+        out.push({ ...rest, run_id: e.run, idempotency_key: e.key, window_to: e.windowTo });
       }
       return Promise.resolve(out);
     },
@@ -71,29 +99,27 @@ function fakeDb(rows: Omit<DigestRecipient, 'idempotency_key'>[], opts: { cap?: 
   };
   return f;
 }
-const okSend = () => Promise.resolve({ ok: true as const, id: 'rid' });
+const okSend = (): Promise<SendResult> => Promise.resolve({ ok: true as const, id: 'rid' });
 
-Deno.test('sends one email per recipient with the row idempotency key (run:user) and one-click headers', async () => {
-  const db = fakeDb([recipient(1), recipient(2)]);
+Deno.test('sends one email per recipient with the stored per-window key and one-click headers', async () => {
+  const db = fakeDb([recipient(1), recipient(2)], { now: () => NOW });
   const calls: { key: string; to: string; headers: Record<string, string> | undefined }[] = [];
   const s = await runDigest('daily', '2026-12-04', cfg(), {
     db, send: (key, email) => { calls.push({ key, to: email.to, headers: email.headers }); return okSend(); },
   });
-  assertEquals([s.sent, s.failed, s.skipped, s.capHit], [2, 0, 0, false]);
-  assertEquals(calls.map((c) => c.key), [`${RUN}:${uid(1)}`, `${RUN}:${uid(2)}`]);
+  assertEquals([s.sent, s.failed, s.skipped, s.pending, s.capHit, s.more], [2, 0, 0, 0, false, false]);
+  assertEquals(calls.map((c) => c.key), [keyOf(1), keyOf(2)]);
   assertStringIncludes(calls[0].headers!['List-Unsubscribe'], 'https://fn.example.test/functions/v1/unsubscribe?t=');
   assertStringIncludes(calls[0].headers!['List-Unsubscribe'], 'mailto:unsubscribe@mail.truckeelights.com');
   assertEquals(calls[0].headers!['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
-  // the link token is a valid unsub token for this subscription version
   const t = decodeURIComponent(calls[0].headers!['List-Unsubscribe'].match(/t=([^>]+)>/)![1]);
   const v = await verifyToken('hmac-test', t, 0);
   assert(v.ok && v.purpose === 'unsub' && v.version === 2 && v.publicId === uid(1001));
-  // sent advances last_sent_through for exactly those people
   assertEquals([...db.advanced].sort(), [uid(1), uid(2)]);
 });
 
 Deno.test('idempotent rerun: a second run of the same day sends nothing', async () => {
-  const db = fakeDb([recipient(1), recipient(2)]);
+  const db = fakeDb([recipient(1), recipient(2)], { now: () => NOW });
   let sends = 0;
   const send = () => { sends++; return okSend(); };
   await runDigest('daily', '2026-12-04', cfg(), { db, send });
@@ -102,65 +128,135 @@ Deno.test('idempotent rerun: a second run of the same day sends nothing', async 
   assertEquals([sends, s.sent], [2, 0]);
 });
 
-Deno.test('a crash between Resend and the mark is retried with the same idempotency key', async () => {
-  const db = fakeDb([recipient(1)]);
-  const keys: string[] = [];
-  // First attempt: Resend accepts, then the mark never lands (simulated by the mark throwing).
+Deno.test('crash after Resend accepted (mark lost): the next tick resends the SAME key and the SAME payload', async () => {
+  const c = clock();
+  const db = fakeDb([recipient(1)], c);
+  const sent: { key: string; email: OutgoingEmail }[] = [];
+  const send = (k: string, e: OutgoingEmail) => { sent.push({ key: k, email: e }); return okSend(); };
   const realMark = db.mark;
   db.mark = () => Promise.reject(new Error('crash'));
   let threw = false;
-  try { await runDigest('daily', '2026-12-04', cfg(), { db, send: (k) => { keys.push(k); return okSend(); } }); } catch { threw = true; }
+  try { await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send }); } catch { threw = true; }
   assert(threw);
-  // The SQL hands a stale `sending` row back (after 10 min) with the same key.
-  db.ledger.delete(`${RUN}:${uid(1)}`);
   db.mark = realMark;
-  await runDigest('daily', '2026-12-04', cfg(), { db, send: (k) => { keys.push(k); return okSend(); } });
-  assertEquals(keys, [`${RUN}:${uid(1)}`, `${RUN}:${uid(1)}`]);
+  // 4 minutes later the row is still "in flight": nothing is handed out again.
+  c.advance(4 * 60_000);
+  await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
+  assertEquals(sent.length, 1);
+  // The next cron tick (10 minutes after the first) resumes it.
+  c.advance(6 * 60_000);
+  const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
+  assertEquals(s.sent, 1);
+  assertEquals(sent.map((x) => x.key), [keyOf(1), keyOf(1)]);
+  assertEquals(sent[1].email, sent[0].email); // byte-identical (Resend rejects a reused key with a different payload)
+});
+
+Deno.test('accepted send + failed mark, then the NEXT DAY run: the unresolved row is resumed with its own key and window', async () => {
+  const c = clock();
+  const db = fakeDb([recipient(1)], c);
+  const sent: { key: string; email: OutgoingEmail }[] = [];
+  const send = (k: string, e: OutgoingEmail) => { sent.push({ key: k, email: e }); return okSend(); };
+  const realMark = db.mark;
+  db.mark = () => Promise.reject(new Error('mark lost'));
+  try { await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send }); } catch { /* crash */ }
+  db.mark = realMark;
+  // No tick that evening got to it. The next evening is a new run with a later window.
+  c.advance(22 * 3600_000);
+  db.runId = RUN2;
+  db.windowTo = '2026-12-06T02:07:00Z';
+  const s = await runDigest('daily', '2026-12-05', cfg({ now: c.now }), { db, send });
+  assertEquals(s.sent, 1);
+  assertEquals(sent.map((x) => x.key), [keyOf(1), keyOf(1)]); // never a new key while the old send is unresolved
+  assertEquals(sent[1].email, sent[0].email);
+  assertEquals(db.ledger.get(`${RUN}:${uid(1)}`)?.status, 'sent'); // the original row is the one resolved
+  assertEquals(db.ledger.has(`${RUN2}:${uid(1)}`), false);
+});
+
+Deno.test('ambiguous provider outcomes (network, 5xx) stay sending and are resumed with the same key', async () => {
+  const c = clock();
+  const db = fakeDb([recipient(1), recipient(2)], c);
+  const keys: string[] = [];
+  let n = 0;
+  const flaky = (k: string): Promise<SendResult> => {
+    keys.push(k);
+    n++;
+    if (n === 1) return Promise.resolve({ ok: false, code: 'network', ambiguous: true });
+    if (n === 2) return Promise.resolve({ ok: false, code: 'http_503', ambiguous: true });
+    return okSend();
+  };
+  const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: flaky });
+  assertEquals([s.sent, s.failed, s.pending], [0, 0, 2]);
+  assertEquals(db.marks, []); // nothing marked failed: Resend may have accepted them
+  c.advance(10 * 60_000);
+  const s2 = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: flaky });
+  assertEquals(s2.sent, 2);
+  assertEquals(keys, [keyOf(1), keyOf(2), keyOf(1), keyOf(2)]);
 });
 
 Deno.test('daily cap comes from the database and is reported', async () => {
-  const db = fakeDb([1, 2, 3, 4, 5].map((n) => recipient(n)), { cap: 3 });
+  const db = fakeDb([1, 2, 3, 4, 5].map((n) => recipient(n)), { now: () => NOW }, { cap: 3 });
   let sends = 0;
   const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => { sends++; return okSend(); } });
   assertEquals([sends, s.sent, s.capHit], [3, 3, true]);
-  // sends already made today count against the cap
-  const db2 = fakeDb([recipient(1)], { cap: 3, sentToday: 3 });
+  const db2 = fakeDb([recipient(1)], { now: () => NOW }, { cap: 3, sentToday: 3 });
   const s2 = await runDigest('daily', '2026-12-04', cfg(), { db: db2, send: () => Promise.reject(new Error('must not send')) });
   assertEquals([s2.sent, s2.capHit], [0, true]);
 });
 
 Deno.test('malformed content is released as failed (empty_render) without a send', async () => {
   const bad = { ...recipient(1), houses: [{ id: 'not-a-uuid', address: 'x' }] };
-  const db = fakeDb([bad]);
+  const db = fakeDb([bad], { now: () => NOW });
   const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => Promise.reject(new Error('must not send')) });
   assertEquals([s.sent, s.skipped], [0, 1]);
   assertEquals(db.marks, [`${uid(1)}:failed:empty_render`]);
-  // and nobody with nothing new is ever claimed
-  const db2 = fakeDb([recipient(2, false)]);
+  const db2 = fakeDb([recipient(2, false)], { now: () => NOW });
   const s2 = await runDigest('daily', '2026-12-04', cfg(), { db: db2, send: () => Promise.reject(new Error('must not send')) });
   assertEquals([s2.sent, s2.skipped, db2.ledger.size], [0, 0, 0]);
 });
 
-Deno.test('a Resend failure is recorded as failed with a code, does not advance, and is retried next run', async () => {
-  const rows = [recipient(1), recipient(2)];
-  const db = fakeDb(rows);
+Deno.test('a definite Resend failure (4xx) is failed with a code, does not advance, and the next run reuses the window key', async () => {
+  const db = fakeDb([recipient(1), recipient(2)], { now: () => NOW });
   let n = 0;
-  const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => Promise.resolve(++n === 1 ? { ok: false as const, code: 'http_500' } : { ok: true as const, id: 'ok' }) });
+  const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => Promise.resolve(++n === 1 ? { ok: false as const, code: 'http_422' } : { ok: true as const, id: 'ok' }) });
   assertEquals([s.sent, s.failed], [1, 1]);
-  assert(db.marks.includes(`${uid(1)}:failed:http_500`));
+  assert(db.marks.includes(`${uid(1)}:failed:http_422`));
   assert(!db.advanced.has(uid(1)));
   assert(!db.marks.some((m) => m.includes('person'))); // no addresses in the ledger
-  // not retried within the same run
   const again = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => Promise.reject(new Error('must not send')) });
   assertEquals(again.sent + again.failed, 0);
-  // the next run (new run id, same window start) picks up only the failed person
   db.runId = RUN2;
   const keys: string[] = [];
   const next = await runDigest('daily', '2026-12-05', cfg(), { db, send: (k) => { keys.push(k); return okSend(); } });
-  assertEquals([next.sent, keys], [1, [`${RUN2}:${uid(1)}`]]);
+  assertEquals([next.sent, keys], [1, [keyOf(1)]]); // same content window -> same key
 });
 
-Deno.test('sendEmail: header, body, 429 retries once with the same key, errors become codes', async () => {
+Deno.test('bounded worker: stops at the time budget, leaves claimed rows for the next tick, which finishes them', async () => {
+  const c = clock();
+  const rows = [1, 2, 3, 4, 5, 6].map((n) => recipient(n));
+  const db = fakeDb(rows, c);
+  const keys: string[] = [];
+  const slow = (k: string) => { keys.push(k); c.advance(15_000); return okSend(); }; // each send takes 15 s
+  const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: slow });
+  assertEquals([s.sent, s.more], [3, true]); // sends start at 0, 15 and 30 s; the 4th would start at 45 s
+  assertEquals(BUDGET_MS, 40_000);
+  c.advance(10 * 60_000); // next cron tick
+  const s2 = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: slow });
+  assertEquals([s2.sent, s2.more], [3, true]);
+  c.advance(10 * 60_000);
+  const s3 = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: slow });
+  assertEquals([s3.sent, s3.more], [0, false]);
+  assertEquals(keys, rows.map((_, i) => keyOf(i + 1))); // each person exactly once
+});
+
+Deno.test('bounded worker: at most MAX_SENDS per invocation', async () => {
+  const rows = Array.from({ length: MAX_SENDS + 20 }, (_, i) => recipient(i + 1));
+  const db = fakeDb(rows, { now: () => NOW });
+  let sends = 0;
+  const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => { sends++; return okSend(); } });
+  assertEquals([sends, s.more], [MAX_SENDS, true]);
+});
+
+Deno.test('sendEmail: header, body, 429 retries once with the same key, errors become codes; ambiguous ones are flagged', async () => {
   const seen: { key: string | null; auth: string | null }[] = [];
   let calls = 0;
   const fake = ((_u: string, init: RequestInit) => {
@@ -171,20 +267,34 @@ Deno.test('sendEmail: header, body, 429 retries once with the same key, errors b
   }) as unknown as typeof fetch;
   const email = { from: 'a@x.test', to: 'b@x.test', subject: 's', html: 'h', text: 't' };
   let slept = 0;
-  const r = await sendEmail('re_k', 'run:user', email, { fetch: fake, sleep: (ms) => { slept = ms; return Promise.resolve(); } });
+  const r = await sendEmail('re_k', 'digest:k', email, { fetch: fake, sleep: (ms) => { slept = ms; return Promise.resolve(); } });
   assertEquals(r, { ok: true, id: 'abc' });
   assertEquals(slept, 1000);
-  assertEquals(seen.map((s) => s.key), ['run:user', 'run:user']);
+  assertEquals(seen.map((s) => s.key), ['digest:k', 'digest:k']);
   assertEquals(seen[0].auth, 'Bearer re_k');
   const bad = await sendEmail('k', 'a:b', email, { fetch: (() => Promise.resolve(new Response('{"message":"secret detail"}', { status: 422 }))) as unknown as typeof fetch });
   assertEquals(bad, { ok: false, code: 'http_422' });
+  const down = await sendEmail('k', 'a:b', email, { fetch: (() => Promise.resolve(new Response('x', { status: 502 }))) as unknown as typeof fetch });
+  assertEquals(down, { ok: false, code: 'http_502', ambiguous: true });
   const net = await sendEmail('k', 'a:b', email, { fetch: (() => Promise.reject(new Error('boom'))) as unknown as typeof fetch });
-  assertEquals(net, { ok: false, code: 'network' });
+  assertEquals(net, { ok: false, code: 'network', ambiguous: true });
 });
 
-Deno.test('handler: bearer required (constant-time), POST only, not-due skips, explicit kind runs', async () => {
+Deno.test('Pacific slot: 18:xx and 19:xx run (both DST offsets); the rest of the 01-03 UTC window is not due', () => {
+  // PST (UTC-8): 02:07..03:57 UTC run; 01:07 UTC is 17:07 -> not due
+  assertEquals(dueKinds(new Date('2026-12-05T01:07:00Z')).kinds, []);
+  assertEquals(dueKinds(new Date('2026-12-05T02:07:00Z')).kinds, ['daily']);
+  assertEquals(dueKinds(new Date('2026-12-05T03:57:00Z')).kinds, ['daily']);
+  // PDT (UTC-7): 01:07..02:57 UTC run; 03:07 UTC is 20:07 -> not due
+  assertEquals(dueKinds(new Date('2026-10-16T01:07:00Z')).kinds, ['daily', 'weekly']); // Thursday 18:07 PDT
+  assertEquals(dueKinds(new Date('2026-10-16T02:57:00Z')).kinds, ['daily', 'weekly']);
+  assertEquals(dueKinds(new Date('2026-10-16T03:07:00Z')).kinds, []);
+  assertEquals(dueKinds(new Date('2026-10-16T02:57:00Z')).date, '2026-10-15');
+});
+
+Deno.test('handler: bearer required (constant-time), POST only, not-due skips, explicit kind runs, reports more', async () => {
   const env: DigestEnv = { cronSecret: 'cron-secret-xyz', config: cfg() };
-  const db = fakeDb([recipient(1)]);
+  const db = fakeDb([recipient(1)], { now: () => NOW });
   const deps = { db, send: okSend };
   const req = (method: string, auth?: string, body?: unknown) =>
     new Request('https://fn.test/send-digest', { method, headers: auth ? { authorization: auth } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -194,9 +304,12 @@ Deno.test('handler: bearer required (constant-time), POST only, not-due skips, e
   assertEquals((await handle(req('POST', 'Bearer cron-secret-xyz'), null, deps)).status, 500);
   const ok = await handle(req('POST', 'Bearer cron-secret-xyz', {}), env, deps);
   assertEquals(ok.status, 200);
-  assertEquals((await ok.json()).runs[0].sent, 1);
+  const body = await ok.json();
+  assertEquals([body.runs[0].sent, body.more], [1, false]);
   const off = { ...env, config: cfg({ now: () => new Date('2026-12-05T01:07:00Z') }) }; // 17:07 Pacific
   assertEquals((await (await handle(req('POST', 'Bearer cron-secret-xyz', {}), off, deps)).json()).skipped, 'not_due');
-  const forced = await handle(req('POST', 'Bearer cron-secret-xyz', { kind: 'weekly' }), off, { db: fakeDb([]) });
+  const late = { ...env, config: cfg({ now: () => new Date('2026-12-05T03:47:00Z') }) }; // 19:47 Pacific: still the slot
+  assertEquals((await (await handle(req('POST', 'Bearer cron-secret-xyz', {}), late, { db: fakeDb([], { now: () => NOW }) })).json()).runs.length, 1);
+  const forced = await handle(req('POST', 'Bearer cron-secret-xyz', { kind: 'weekly' }), off, { db: fakeDb([], { now: () => NOW }) });
   assertEquals((await forced.json()).runs[0].kind, 'weekly');
 });

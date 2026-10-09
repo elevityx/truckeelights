@@ -12,8 +12,8 @@ import {
   finishSubscription,
   nextFor,
   parseConfirm,
-  readChoices,
   saveMessage,
+  takeIntent,
   type Choices,
   type ConfirmParams,
 } from './flow';
@@ -90,11 +90,17 @@ export default function ConfirmApp() {
       setView({ k: 'ready', busy: false, error: linkMessage(toDataError(e).code) });
       return;
     }
-    if (p.branch === 'recovery') return go('/admin/'); // C3: admins only; /admin/ asks for TOTP, then has the password form
+    if (p.branch === 'recovery') {
+      // C3: admins only. The admin page runs its recovery flow: authenticator code, set a new password, then a normal
+      // password + authenticator sign-in that opens the console.
+      clearChoices(session);
+      return go('/admin/?recovery=1');
+    }
     if (p.branch === 'email_change') return setView({ k: 'email_changed' });
-    // Sign-in: save the choices kept by the Subscribe sheet in this browser (B2). The templates' links carry no
-    // `next`, so fall back to the one the sending page recorded in this browser (the account page's sign-in).
-    const stored = readChoices(session);
+    // Sign-in: save the choices kept by the Subscribe sheet in this browser (B2), but only a fresh (< 1 h) Subscribe
+    // intent made for the address that is now signed in; anything else is cleared unused. The templates' links carry
+    // no `next`, so fall back to the one the sending page recorded in this browser (the account page's sign-in).
+    const stored = takeIntent(session, await api.sessionEmail());
     const next = confirmNext(p.next, session);
     try {
       if (stored) return await save(api, stored, next);
@@ -212,7 +218,7 @@ export default function ConfirmApp() {
             <h3>{kind === 'email_change' ? 'Confirm your new email' : kind === 'recovery' ? 'Reset the admin password' : 'Confirm your email'}</h3>
             <p>
               {kind === 'recovery'
-                ? 'Password reset is for site admins only. After you confirm, the admin page asks for your 2FA code.'
+                ? 'Password reset is for site admins only. After you confirm, the admin page asks for your authenticator code, then lets you set a new password.'
                 : 'Tap Confirm to finish. This extra tap stops email scanners from using your link before you do.'}
             </p>
           </div>

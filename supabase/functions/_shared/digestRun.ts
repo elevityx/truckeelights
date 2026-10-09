@@ -1,18 +1,26 @@
-// The send loop for one run kind (C8). The database owns the ledger and the cap:
-//   svc_digest_start   -> the run for (kind, Pacific date); a same-day rerun resumes it with the same window
-//   svc_digest_batch   -> claims recipients with something new as `sending`, stops at app_settings.digest_daily_cap
-//   (Resend, with Idempotency-Key = the row's run_id:user_id)
-//   svc_digest_mark    -> 2xx: `sent`, advancing last_sent_through; else `failed` with a short code (the window is not
-//                         advanced, so the next run picks the same items up again)
+// The send loop for one run kind (C8), bounded per invocation. The database owns the ledger, the keys and the cap:
+//   svc_digest_start   -> the run for (kind, Pacific date); every cron tick that evening resumes the same run
+//   svc_digest_batch   -> resumes unresolved `sending` rows (any run, idle 5 min) with their stored key and window, then
+//                         claims new recipients as `sending` with key digest:<public_id>:<window start>; stops at
+//                         app_settings.digest_daily_cap
+//   (Resend, with Idempotency-Key = the row's stored key)
+//   svc_digest_mark    -> a DEFINITE outcome only: 2xx -> `sent`, advancing last_sent_through; 4xx -> `failed`
+//                         (the window is not advanced, so the next run picks the items up again). An ambiguous outcome
+//                         (timeout, network error, 5xx) is left `sending` and resumed later with the same key.
 //   svc_digest_finish  -> totals and cap_hit
-// A rerun never re-sends a `sent` row, and a crash between Resend and the mark is retried with the same key.
-// Logs only counts and ids.
+// Each invocation stops claiming and sending at its deadline (~40 s) or after MAX_SENDS, and reports `more`; rows it
+// claimed but did not send stay `sending` and the next 10-minute tick resumes them. Logs only counts and ids.
 import type { Cadence, DigestDb, DigestRecipient } from './db.ts';
 import { renderDigest } from './digestEmail.ts';
 import { sendEmail, type OutgoingEmail, type SendResult, type Sleep } from './resend.ts';
 import { signToken, PREFS_TTL_SECONDS } from './token.ts';
 
-export const CHUNK = 100;
+/** Recipients claimed per batch call (small, so a deadline leaves few claimed-but-unsent rows). */
+export const CHUNK = 10;
+/** Most sends one invocation attempts before returning. */
+export const MAX_SENDS = 100;
+/** Wall-clock budget of one invocation; no new batch or send starts after it. */
+export const BUDGET_MS = 40_000;
 export const UNSUBSCRIBE_MAILTO = 'mailto:unsubscribe@mail.truckeelights.com?subject=unsubscribe';
 
 export interface RunConfig {
@@ -33,10 +41,23 @@ export interface RunDeps {
   log?: (line: string) => void;
 }
 
-export interface RunSummary { kind: Cadence; sent: number; failed: number; skipped: number; capHit: boolean }
+export interface RunSummary {
+  kind: Cadence; sent: number; failed: number; skipped: number;
+  /** Ambiguous provider outcomes left `sending` for a later resume with the same key. */
+  pending: number;
+  capHit: boolean;
+  /** The budget or MAX_SENDS ran out with work possibly left: the next tick continues. */
+  more: boolean;
+}
+
+/** A shared per-invocation budget: deadline (epoch ms) and sends left. */
+export interface Budget { deadline: number; sendsLeft: number }
 
 export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<OutgoingEmail | null> {
-  const nowS = Math.floor(cfg.now().getTime() / 1000);
+  // The prefs link's expiry derives from the row's window, not the clock, so a resumed send (same idempotency key)
+  // renders byte-for-byte the same email. Resend rejects a reused key with a different payload.
+  const windowS = Math.floor(Date.parse(r.window_to) / 1000);
+  const nowS = Number.isFinite(windowS) ? windowS : Math.floor(cfg.now().getTime() / 1000);
   const unsubToken = await signToken(cfg.hmacSecret, { publicId: r.public_id, version: r.token_version, purpose: 'unsub', exp: 0 });
   const prefsToken = await signToken(cfg.hmacSecret, { publicId: r.public_id, version: r.token_version, purpose: 'prefs', exp: nowS + PREFS_TTL_SECONDS });
   // The one-click POST goes straight to the function; the human link goes to the static page.
@@ -64,34 +85,44 @@ export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<Ou
   };
 }
 
-export async function runDigest(kind: Cadence, runDate: string, cfg: RunConfig, deps: RunDeps): Promise<RunSummary> {
+export async function runDigest(
+  kind: Cadence, runDate: string, cfg: RunConfig, deps: RunDeps,
+  budget: Budget = { deadline: cfg.now().getTime() + BUDGET_MS, sendsLeft: MAX_SENDS },
+): Promise<RunSummary> {
   const log = deps.log ?? (() => {});
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const send = deps.send ?? ((key: string, email: OutgoingEmail) => sendEmail(cfg.resendKey, key, email, { sleep }));
   const runId = await deps.db.start(kind, runDate);
-  const summary: RunSummary = { kind, sent: 0, failed: 0, skipped: 0, capHit: false };
+  const summary: RunSummary = { kind, sent: 0, failed: 0, skipped: 0, pending: 0, capHit: false, more: false };
   const seen = new Set<string>();
+  const outOfBudget = () => budget.sendsLeft <= 0 || cfg.now().getTime() >= budget.deadline;
 
-  while (true) {
-    const chunk = await deps.db.batch(runId, CHUNK);
-    const fresh = chunk.filter((r) => !seen.has(r.user_id));
+  outer: while (true) {
+    if (outOfBudget()) { summary.more = true; break; }
+    const chunk = await deps.db.batch(runId, Math.min(CHUNK, budget.sendsLeft));
+    const fresh = chunk.filter((r) => !seen.has(`${r.run_id}:${r.user_id}`));
     if (fresh.length === 0) break; // nothing left (or the cap is reached), or only rows already handled: never loop
     for (const r of fresh) {
-      seen.add(r.user_id);
+      // Claimed rows not reached before the deadline stay `sending`; the next tick resumes them (same key).
+      if (outOfBudget()) { summary.more = true; break outer; }
+      seen.add(`${r.run_id}:${r.user_id}`);
       const email = await buildEmail(r, cfg);
       if (!email) {
         // The SQL returns only people with something new, so this means malformed content. Release the claim as a
         // failure (the window stays put; the next run tries again) rather than leaving it `sending`.
-        await deps.db.mark(runId, r.user_id, false, 'empty_render');
+        await deps.db.mark(r.run_id, r.user_id, false, 'empty_render');
         summary.skipped++;
         continue;
       }
+      budget.sendsLeft--;
       const res = await send(r.idempotency_key, email);
       if (res.ok) {
-        await deps.db.mark(runId, r.user_id, true, null);
+        await deps.db.mark(r.run_id, r.user_id, true, null);
         summary.sent++;
+      } else if (res.ambiguous) {
+        summary.pending++; // Resend may have accepted it: never re-key; resumed after 5 minutes idle
       } else {
-        await deps.db.mark(runId, r.user_id, false, res.code);
+        await deps.db.mark(r.run_id, r.user_id, false, res.code);
         summary.failed++;
       }
       if (cfg.paceMs > 0) await sleep(cfg.paceMs);
@@ -100,6 +131,6 @@ export async function runDigest(kind: Cadence, runDate: string, cfg: RunConfig, 
   const totals = await deps.db.finish(runId);
   summary.capHit = totals.cap_hit === true;
   if (summary.capHit) log(`digest_cap_hit run=${runId}`);
-  log(`digest_run kind=${kind} run=${runId} sent=${summary.sent} failed=${summary.failed} skipped=${summary.skipped} cap_hit=${summary.capHit}`);
+  log(`digest_run kind=${kind} run=${runId} sent=${summary.sent} failed=${summary.failed} pending=${summary.pending} skipped=${summary.skipped} cap_hit=${summary.capHit} more=${summary.more}`);
   return summary;
 }

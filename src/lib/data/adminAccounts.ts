@@ -87,7 +87,7 @@ export async function adminSubscriberCounts(regionId: string): Promise<Subscribe
   };
 }
 
-/** Today's digest sends (all regions; the email provider's limit is per account). Any admin (aal2) may read it. */
+/** Today's digest emails against the digest daily cap (all regions; the cap is global). Any admin (aal2) may read it. */
 export async function adminDigestToday(): Promise<DigestToday> {
   const r = first(await rpc('admin_digest_today'));
   if (!r) throw new DataError('unknown');
@@ -95,7 +95,6 @@ export async function adminDigestToday(): Promise<DigestToday> {
     sent: num(r.sent),
     failed: num(r.failed),
     cap: num(r.cap),
-    providerDailyLimit: num(r.provider_daily_limit),
     capHit: r.cap_hit === true,
   };
 }

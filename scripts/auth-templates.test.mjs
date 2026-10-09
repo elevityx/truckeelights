@@ -31,5 +31,8 @@ test('the digest cron migration holds no secret and is a no-op without Vault sec
   const sql = readFileSync(fileURLToPath(new URL('../supabase/migrations/20261016000300_digest_cron.sql', import.meta.url)), 'utf8');
   assert.ok(/decrypted_secret[\s\S]*digest_function_url/.test(sql));
   assert.ok(/is null|coalesce\(v_url, ''\) = ''/.test(sql) && /return null/.test(sql));
-  assert.ok(!/https?:\/\//.test(sql.replace(/--.*$/gm, '')), 'no URL in code');
+  // The scheme appears (the URL must be exactly 'https://' || <project host> || path), but never a host: the host comes
+  // from the storage_api_url Vault secret at run time.
+  assert.ok(!/https?:\/\/[A-Za-z0-9]/.test(sql.replace(/--.*$/gm, '')), 'no URL host in code');
+  assert.ok(/storage_api_url/.test(sql) && /digest_url_ok/.test(sql), 'the URL is checked against the project host');
 });

@@ -8,8 +8,8 @@ const PID = '11111111-2222-4333-8444-555555555555';
 const NOW = new Date('2026-12-05T02:07:00Z');
 const nowS = Math.floor(NOW.getTime() / 1000);
 
-// Mirrors svc_unsubscribe_* (20261016000200): lookup/stop/set_prefs match (public_id, token_version); stop works only on
-// an active row and bumps the version (killing every link); set_prefs works only on an active row.
+// Mirrors svc_unsubscribe_* (20261016000200): lookup/stop/set_prefs match (public_id, token_version); stop does NOT
+// bump the version (a retry answers 'already_stopped'); only a resubscribe bumps it; set_prefs works only on an active row.
 function fake(version = 1) {
   const state = { status: 'active' as 'active' | 'stopped', houses: true, events: false, cadence: 'daily' as Cadence, token_version: version, mutations: 0 };
   const db: UnsubscribeDb = {
@@ -18,8 +18,9 @@ function fake(version = 1) {
         ? { status: state.status, houses: state.houses, events: state.events, cadence: state.cadence, region_name: 'Truckee' }
         : null),
     stop: (id, v) => {
-      if (id !== PID || v !== state.token_version || state.status !== 'active') return Promise.resolve('invalid');
-      state.mutations++; state.status = 'stopped'; state.token_version++;
+      if (id !== PID || v !== state.token_version) return Promise.resolve('invalid');
+      if (state.status === 'stopped') return Promise.resolve('already_stopped');
+      state.mutations++; state.status = 'stopped';
       return Promise.resolve('stopped');
     },
     setPrefs: (id, v, h, e, c) => {
@@ -60,6 +61,22 @@ Deno.test('one-click POST (form body, token in query) stops', async () => {
   assertEquals(state.status, 'stopped');
 });
 
+Deno.test('one-click retry of the same token succeeds: 200 already_stopped, no second mutation', async () => {
+  const { state, deps } = fake();
+  const t = await unsub();
+  const oneClick = () => new Request(`https://fn.test/unsubscribe?t=${encodeURIComponent(t)}`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click',
+  });
+  const first = await handle(oneClick(), deps);
+  assertEquals([first.status, (await first.json()).status], [200, 'stopped']);
+  const retry = await handle(oneClick(), deps);
+  assertEquals([retry.status, (await retry.json()).status], [200, 'already_stopped']);
+  assertEquals(state.mutations, 1);
+  // a resubscribe bumps the version, and only then is the old link dead
+  state.status = 'active'; state.token_version++;
+  assertEquals((await handle(oneClick(), deps)).status, 410);
+});
+
 Deno.test('stale version (bumped), tampered and malformed tokens are rejected and change nothing', async () => {
   const { state, deps } = fake(2);
   assertEquals((await handle(post(await unsub(1)), deps)).status, 410); // version bumped since
@@ -83,10 +100,13 @@ Deno.test('prefs: get and set need a prefs token; expired is 410; invalid input 
   assertEquals(state.mutations, 0);
   assertEquals((await handle(post(p, { action: 'set', houses: true, events: true, cadence: 'weekly' }, false), deps)).status, 200);
   assertEquals([state.houses, state.events, state.cadence], [true, true, 'weekly']);
-  // a prefs link can also stop; stopping bumps the version, so the same link is dead afterwards
+  // a prefs link can also stop; a second stop is still 200 (already stopped); the prefs view shows "stopped"
   assertEquals((await handle(post(p, { action: 'stop' }), deps)).status, 200);
-  assertEquals((await handle(post(p, { action: 'stop' }), deps)).status, 410);
-  assertEquals((await handle(post(p, { action: 'get' }), deps)).status, 410);
+  const again = await handle(post(p, { action: 'stop' }), deps);
+  assertEquals([again.status, (await again.json()).status], [200, 'already_stopped']);
+  assertEquals((await (await handle(post(p, { action: 'get' }), deps)).json()).status, 'stopped');
+  // changing topics on a stopped subscription is refused
+  assertEquals((await handle(post(p, { action: 'set', houses: true, events: false, cadence: 'daily' }), deps)).status, 410);
 });
 
 Deno.test('OPTIONS, other methods, and a missing secret', async () => {

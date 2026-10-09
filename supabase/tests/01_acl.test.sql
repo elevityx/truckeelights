@@ -275,11 +275,11 @@ select is(
   (select array_agg(format('%I(%s)', p.proname, oidvectortypes(p.proargtypes)) order by p.proname)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname like 'svc\_%' and has_function_privilege('service_role', p.oid, 'EXECUTE')),
-  array['svc_delete_account(uuid)', 'svc_digest_batch(uuid, integer)', 'svc_digest_finish(uuid)',
+  array['svc_delete_account(uuid)', 'svc_delete_account_check(uuid)', 'svc_digest_batch(uuid, integer)', 'svc_digest_finish(uuid)',
         'svc_digest_mark(uuid, uuid, boolean, text)', 'svc_digest_start(text, date)',
         'svc_unsubscribe_lookup(uuid, integer)', 'svc_unsubscribe_set_prefs(uuid, integer, boolean, boolean, text)',
         'svc_unsubscribe_stop(uuid, integer)'],
-  'service_role executes exactly the eight svc_* routines');
+  'service_role executes exactly the nine svc_* routines');
 select ok(not has_function_privilege('anon', 'public.photo_sign_paths(uuid)', 'EXECUTE')
           and not has_function_privilege('authenticated', 'public.photo_sign_paths(uuid)', 'EXECUTE'), 'anon/authenticated cannot execute photo_sign_paths');
 
@@ -327,7 +327,7 @@ select is(
         'public.owner_set_house_visibility', 'public.photo_sign_paths', 'public.request_house_claim',
         'public.request_house_removal', 'public.reserve_photo', 'public.set_subscription', 'public.stop_subscription',
         'public.submit_event', 'public.submit_house',
-        'public.svc_delete_account', 'public.svc_digest_batch', 'public.svc_digest_finish', 'public.svc_digest_mark',
+        'public.svc_delete_account', 'public.svc_delete_account_check', 'public.svc_digest_batch', 'public.svc_digest_finish', 'public.svc_digest_mark',
         'public.svc_digest_start', 'public.svc_unsubscribe_lookup', 'public.svc_unsubscribe_set_prefs',
         'public.svc_unsubscribe_stop',
         'public.vote_house', 'public.withdraw_house_claim'],

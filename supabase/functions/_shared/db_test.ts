@@ -24,13 +24,13 @@ const P = '11111111-2222-4333-8444-555555555555';
 Deno.test('digest: svc_digest_start / batch / mark / finish signatures and shapes', async () => {
   const { sb, calls } = fakeClient({
     svc_digest_start: { data: RUN, error: null },
-    svc_digest_batch: { data: [{ user_id: U, idempotency_key: `${RUN}:${U}` }], error: null },
+    svc_digest_batch: { data: [{ run_id: RUN, user_id: U, idempotency_key: `digest:${P}:2026-12-04T02:07:00.000000Z`, window_to: '2026-12-05T02:07:00Z' }], error: null },
     svc_digest_mark: { data: true, error: null },
     svc_digest_finish: { data: [{ sent: 1, failed: 0, cap_hit: true }], error: null },
   });
   const db = digestDb(sb);
   assertEquals(await db.start('daily', '2026-12-04'), RUN);
-  assertEquals((await db.batch(RUN, 100))[0].idempotency_key, `${RUN}:${U}`);
+  assertEquals((await db.batch(RUN, 100))[0].idempotency_key, `digest:${P}:2026-12-04T02:07:00.000000Z`);
   assertEquals(await db.mark(RUN, U, false, 'http_500'), true);
   assertEquals(await db.finish(RUN), { sent: 1, failed: 0, cap_hit: true });
   assertEquals(calls, [
@@ -68,14 +68,18 @@ Deno.test('unsubscribe: lookup / stop / set_prefs take (public_id, version) and 
   assertEquals(await none.lookup(P, 1), null);
   assertEquals(await none.stop(P, 1), 'invalid');
   assertEquals(await none.setPrefs(P, 1, true, false, 'daily'), 'invalid');
+  const again = unsubscribeDb(fakeClient({ svc_unsubscribe_stop: { data: 'already_stopped', error: null } }).sb);
+  assertEquals(await again.stop(P, 1), 'already_stopped');
 });
 
-Deno.test('account: svc_delete_account(p_user_id) returns a count; 42501 (admin) maps to forbidden', async () => {
-  const ok = fakeClient({ svc_delete_account: { data: 2, error: null } });
-  assertEquals(await accountDb(ok.sb).deleteAccount(U), 'ok');
-  assertEquals(ok.calls, [['svc_delete_account', { p_user_id: U }]]);
-  const admin = fakeClient({ svc_delete_account: { data: null, error: { code: '42501', message: 'forbidden' } } });
-  assertEquals(await accountDb(admin.sb).deleteAccount(U), 'forbidden');
+Deno.test('account: svc_delete_account_check maps ok / gone / forbidden (fail closed); svc_delete_account cleans up', async () => {
+  const ok = fakeClient({ svc_delete_account_check: { data: 'ok', error: null }, svc_delete_account: { data: 0, error: null } });
+  assertEquals(await accountDb(ok.sb).checkDelete(U), 'ok');
+  await accountDb(ok.sb).cleanupDeleted(U);
+  assertEquals(ok.calls, [['svc_delete_account_check', { p_user_id: U }], ['svc_delete_account', { p_user_id: U }]]);
+  assertEquals(await accountDb(fakeClient({ svc_delete_account_check: { data: 'gone', error: null } }).sb).checkDelete(U), 'gone');
+  assertEquals(await accountDb(fakeClient({ svc_delete_account_check: { data: 'forbidden', error: null } }).sb).checkDelete(U), 'forbidden');
+  assertEquals(await accountDb(fakeClient({ svc_delete_account_check: { data: 'weird', error: null } }).sb).checkDelete(U), 'forbidden');
   const broken = fakeClient({ svc_delete_account: { data: null, error: { code: 'XX000', message: 'x' } } });
-  await assertRejects(() => accountDb(broken.sb).deleteAccount(U));
+  await assertRejects(() => accountDb(broken.sb).cleanupDeleted(U));
 });

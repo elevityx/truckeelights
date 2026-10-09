@@ -225,9 +225,8 @@ export interface SubscriberCounts {
   events: number;
 }
 export interface DigestToday {
-  sent: number; // digest emails sent today (UTC day)
+  sent: number; // digest emails sent today (UTC day). Digest mail only: sign-in mail is not counted.
   failed: number;
-  cap: number; // digest send cap per day
-  providerDailyLimit: number; // the email provider's daily limit (100); the banner warns at 80%
+  cap: number; // app_settings.digest_daily_cap; the Overview warns at 80% of it
   capHit: boolean;
 }

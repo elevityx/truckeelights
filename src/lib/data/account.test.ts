@@ -89,8 +89,8 @@ describe('mappers', () => {
   it('maps admin_subscriber_counts and admin_digest_today (first row)', async () => {
     rpc.mockResolvedValueOnce({ data: [{ active: 3, stopped: 1, daily: 2, weekly: 1, houses: 3, events: 1 }], error: null });
     expect(await adminSubscriberCounts('r1')).toEqual({ active: 3, stopped: 1, daily: 2, weekly: 1, houses: 3, events: 1 });
-    rpc.mockResolvedValueOnce({ data: [{ sent: 40, failed: 1, cap: 50, provider_daily_limit: 100, cap_hit: false }], error: null });
-    expect(await adminDigestToday()).toEqual({ sent: 40, failed: 1, cap: 50, providerDailyLimit: 100, capHit: false });
+    rpc.mockResolvedValueOnce({ data: [{ sent: 40, failed: 1, cap: 500, cap_hit: false }], error: null });
+    expect(await adminDigestToday()).toEqual({ sent: 40, failed: 1, cap: 500, capHit: false });
     expect(rpc).toHaveBeenLastCalledWith('admin_digest_today', undefined);
   });
 });

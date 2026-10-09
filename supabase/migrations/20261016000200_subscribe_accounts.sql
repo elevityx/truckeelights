@@ -9,9 +9,10 @@
 --   houses row (FOR SHARE / FOR UPDATE) -> house_claims rows -> quota advisory locks (claim:* / owner_vis:*)
 --     -> photo advisory + photos rows -> storage_jobs rows        (owner hide, claims, admin resolve/clear, release)
 --   house_link:uid -> house_link:email advisory locks -> house_links rows                 (begin_house_link)
---   house_links rows (id order) -> houses rows (id order)                                 (complete_house_link)
+--   house_links rows (id order) -> the UNION of their houses rows (one pass, global id order)  (complete_house_link)
 --   subscribe:uid advisory (take_quota) -> subscriptions row                             (set_subscription)
---   digest_runs row -> subscriptions rows (SKIP LOCKED) -> digest_sends rows             (svc_digest_batch)
+--   digest_runs row -> digest_cap:<UTC day> advisory -> subscriptions rows (SKIP LOCKED) -> digest_sends rows
+--                                                                                         (svc_digest_batch)
 -- None of these paths takes a site_settings lock or an event:* / vote:* lock, so they add no edge to the votes or
 -- events graphs. admin_set_house_status and admin_release_house keep their existing order (houses row, then photos).
 
@@ -26,15 +27,27 @@ alter table public.houses add column owner_id uuid references auth.users(id) on 
 alter table public.houses add column owner_since timestamptz;
 alter table public.houses add constraint houses_owner_since check ((owner_id is null) = (owner_since is null));
 create index houses_owner_idx on public.houses (owner_id) where owner_id is not null;
+-- owner_since follows owner_id: whenever owner_id becomes null (an RPC, or the FK's ON DELETE SET NULL when the account
+-- is deleted), owner_since is cleared too, so houses_owner_since can never block an auth.users delete.
+create function private.houses_owner_since_sync() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.owner_id is null then new.owner_since := null;
+  elsif new.owner_since is null then new.owner_since := now(); end if;
+  return new;
+end $$;
+create trigger houses_owner_since_sync before insert or update of owner_id, owner_since on public.houses
+  for each row execute function private.houses_owner_since_sync();
 
 -- B6: when an event first became public (approved or admin-created). Not granted to API roles.
 alter table public.events add column approved_at timestamptz;
 update public.events set approved_at = coalesce(moderated_at, created_at) where status in ('approved', 'hidden');
 create index events_approved_idx on public.events (region_id, season, year, approved_at) where status = 'approved';
 
--- C8: daily digest send cap (the email provider's daily limit is 100 emails; the rest is left for login mail).
-alter table public.app_settings add column digest_daily_cap smallint not null default 50
-  check (digest_daily_cap between 0 and 100);
+-- C8: daily digest send cap, counted across every run kind (svc_digest_batch reserves it under one lock per UTC day).
+-- The owner is on a paid Resend plan, so this is a cost/abuse guard, not the provider's limit.
+alter table public.app_settings add column digest_daily_cap smallint not null default 500
+  check (digest_daily_cap between 0 and 10000);
 
 alter table private.quota_events drop constraint quota_events_kind_check;
 alter table private.quota_events add constraint quota_events_kind_check
@@ -108,13 +121,20 @@ create table private.digest_runs (
   unique (kind, run_date)
 );
 
--- C8: one row per (run, user); the provider idempotency key is run_id:user_id. error_code only, no provider text.
+-- C8: one row per (run, user). error_code only, no provider text.
+-- The provider Idempotency-Key is per CONTENT WINDOW, not per run: digest:<public_id>:<window_from, ISO UTC>, where
+-- window_from is the subscription's last_sent_through when the row was claimed. It is stored here and reused for every
+-- retry of the row: the same run's next cron tick, or a later day's run (svc_digest_batch resumes an unresolved
+-- `sending` row with its own key and window before minting anything new). Resend dedupes a key for 24 h; an ambiguous
+-- send resumed more than 24 h later can be delivered twice (accepted residual risk, Review_Code_Subscribe).
 create table private.digest_sends (
   run_id uuid not null references private.digest_runs(run_id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   status text not null check (status in ('sending', 'sent', 'failed')),
   attempts integer not null default 1,
   error_code text check (error_code is null or error_code ~ '^[a-z0-9_]{1,40}$'),
+  idempotency_key text not null check (idempotency_key ~ '^digest:[0-9a-f-]{36}:[0-9T:.Z-]{20,32}$'),
+  window_from timestamptz not null,
   window_to timestamptz not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -122,7 +142,7 @@ create table private.digest_sends (
   primary key (run_id, user_id)
 );
 create index digest_sends_day_idx on private.digest_sends (status, updated_at);
-create index digest_sends_user_idx on private.digest_sends (user_id);
+create index digest_sends_user_idx on private.digest_sends (user_id, status);
 
 alter table public.subscriptions  enable row level security;
 alter table public.subscriptions  force row level security;
@@ -336,6 +356,75 @@ begin
   perform private.release_house_core(p_house_id, auth.uid());
 end $$;
 
+-- Same body as 20261008000400 (unchanged dedupe, locks, quota), plus: when the caller is a signed-in, non-anonymous
+-- account, the new house is owned by it (owner_id = auth.uid(), owner_since = now()). Anonymous adds stay unowned until
+-- complete_house_link. (Fixes Review_Code_Subscribe P1: signed-in adds never became managed houses.)
+create or replace function public.submit_house(p_region_slug text, p_place_id text, p_address text,
+                                    p_lat double precision, p_lng double precision)
+returns table (result text, house_id uuid)
+language plpgsql security definer set search_path = '' as $$
+#variable_conflict use_column
+declare
+  v_uid uuid := auth.uid();
+  v_region public.regions%rowtype;
+  v_set public.site_settings%rowtype;
+  v_address text := btrim(regexp_replace(coalesce(p_address, ''), '\s+', ' ', 'g'));
+  v_norm text;
+  v_hit public.houses%rowtype;
+  v_id uuid;
+  -- Subscribe v1: a signed-in (non-anonymous) account that adds a house manages it from the start.
+  v_owner uuid := case when coalesce((auth.jwt() ->> 'is_anonymous')::boolean, true) = false then auth.uid() end;
+begin
+  if v_uid is null then raise exception 'not_signed_in' using errcode = '28000'; end if;
+  select * into v_region from public.regions where slug = p_region_slug and is_active;
+  if not found then raise exception 'region_not_found' using errcode = 'P0002'; end if;
+  select * into v_set from public.site_settings where region_id = v_region.id;
+  if not found or not v_set.submissions_open then
+    raise exception 'submissions_closed' using errcode = 'P0001'; end if;
+  if p_place_id is null or p_place_id !~ '^[A-Za-z0-9_-]+$' or char_length(p_place_id) not between 10 and 300 then
+    raise exception 'invalid_place_id' using errcode = '22023'; end if;
+  perform private.validate_address(v_address);
+  perform private.assert_street_level(v_address, v_region.name);
+  if p_lat is null or p_lng is null then raise exception 'invalid_coordinates' using errcode = '22023'; end if;
+  if not (p_lat between v_region.min_lat and v_region.max_lat and p_lng between v_region.min_lng and v_region.max_lng) then
+    raise exception 'out_of_bounds' using errcode = '22023'; end if;            -- NaN fails BETWEEN too
+  v_norm := private.normalize_address(v_address);
+
+  -- Take the uid -> region locks FIRST, then dedupe, then quota, then insert.
+  -- All submits in a region serialize on the region lock, so the dedupe read sees every committed
+  -- earlier insert. Duplicates never reach take_quota and never return rate_limited.
+  perform private.lock_quota('house', v_region.id);
+  select * into v_hit from public.houses h
+   where h.region_id = v_region.id and h.season = v_set.active_season and h.year = v_set.active_year
+     and (h.place_id = p_place_id or h.normalized_address = v_norm)
+   order by (h.status = 'visible') desc limit 1;
+  if found then
+    if v_hit.status = 'visible' then return query select 'exists_visible'::text, v_hit.id;
+    else return query select 'blocked'::text, null::uuid; end if;            -- no id, no address leak
+    return;
+  end if;
+
+  perform private.take_quota('house', v_region.id, null);   -- re-takes the same xact locks (re-entrant), counts, appends
+
+  insert into public.houses (region_id, season, year, place_id, address, normalized_address,
+                             lat, lng, coord_source, created_by, owner_id, owner_since)
+  values (v_region.id, v_set.active_season, v_set.active_year, p_place_id, v_address, v_norm,
+          p_lat, p_lng, 'user_confirmed', v_uid, v_owner, case when v_owner is not null then now() end)
+  on conflict do nothing
+  returning id into v_id;
+
+  if v_id is null then                                    -- backstop only (e.g. legacy import key); unreachable under the region lock
+    select * into v_hit from public.houses h
+     where h.region_id = v_region.id and h.season = v_set.active_season and h.year = v_set.active_year
+       and (h.place_id = p_place_id or h.normalized_address = v_norm)
+     order by (h.status = 'visible') desc limit 1;
+    if v_hit.status = 'visible' then return query select 'exists_visible'::text, v_hit.id;
+    else return query select 'blocked'::text, null::uuid; end if;
+    return;
+  end if;
+  return query select 'created'::text, v_id;
+end $$;
+
 -- ---------------------------------------------------------------- account RPCs (non-anonymous)
 create function public.set_subscription(p_region_slug text, p_houses boolean, p_events boolean, p_cadence text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -364,12 +453,14 @@ begin
                             'cadence', s.cadence, 'status', s.status, 'confirmed_at', s.confirmed_at);
 end $$;
 
+-- Stopping does not bump token_version (B8 as amended): a repeated one-click POST must still recognise the token and
+-- answer "already stopped". Resubscribing bumps it (set_subscription), and deleting the account removes the row.
 create function public.stop_subscription() returns void
 language plpgsql security definer set search_path = '' as $$
 declare v_uid uuid := private.account_uid();
 begin
   update public.subscriptions
-     set status = 'stopped', stopped_at = now(), token_version = token_version + 1, updated_at = now()
+     set status = 'stopped', stopped_at = now(), updated_at = now()
    where user_id = v_uid and status = 'active';
 end $$;
 
@@ -426,9 +517,12 @@ begin
   v_hash := private.email_hash(v_email);
   perform pg_advisory_xact_lock(hashtextextended('house_link:uid:' || v_uid::text, 0));
   perform pg_advisory_xact_lock(hashtextextended('house_link:email:' || encode(v_hash, 'hex'), 0));
-  update private.house_links set expires_at = now() + interval '1 hour'
-   where anon_uid = v_uid and email_hash = v_hash and used_at is null and expires_at > now();
-  if found then return; end if;
+  -- A live link for the same (device, email) already exists: keep it as it is. Its expiry is never extended, so the
+  -- one-hour authorization cannot be refreshed forever (and a repeat costs no daily attempt).
+  if exists (select 1 from private.house_links
+              where anon_uid = v_uid and email_hash = v_hash and used_at is null and expires_at > now()) then
+    return;
+  end if;
   select count(*) into v_n from private.house_links where anon_uid = v_uid and used_at is null and expires_at > now();
   if v_n >= 3 then raise exception 'rate_limited' using errcode = 'P0001', detail = 'uid_live'; end if;
   select count(*) into v_n from private.house_links where email_hash = v_hash and created_at > now() - interval '24 hours';
@@ -437,24 +531,28 @@ begin
 end $$;
 
 -- B3: matches the session's CONFIRMED email; each live link is used once (row lock + recheck).
+-- Lock order: first every live link row for this email (id order), then the UNION of their candidate houses in one
+-- pass in global house-id order. Two emails whose links name the same devices in opposite orders therefore never lock
+-- houses in crossed order (no 40P01).
 create function public.complete_house_link() returns integer
 language plpgsql security definer set search_path = '' as $$
-declare v_uid uuid := private.account_uid(); v_email text; l record; v_k integer; v_n integer := 0;
+declare v_uid uuid := private.account_uid(); v_email text; v_links bigint[]; v_anons uuid[]; v_n integer;
 begin
   select u.email into v_email from auth.users u where u.id = v_uid and u.email_confirmed_at is not null;
   if v_email is null then return 0; end if;
-  for l in select id, anon_uid from private.house_links
-            where email_hash = private.email_hash(v_email) and used_at is null and expires_at > now()
-            order by id for update loop
-    update public.houses h set owner_id = v_uid, owner_since = now()
-     where h.id in (select x.id from public.houses x
-                     where x.created_by = l.anon_uid and x.owner_id is null and x.status <> 'released'
-                     order by x.id for update)
-       and h.owner_id is null;
-    get diagnostics v_k = row_count;
-    v_n := v_n + v_k;
-    update private.house_links set used_at = now(), used_by = v_uid where id = l.id;
-  end loop;
+  select coalesce(array_agg(l.id order by l.id), '{}'), coalesce(array_agg(distinct l.anon_uid), '{}')
+    into v_links, v_anons
+    from (select x.id, x.anon_uid from private.house_links x
+           where x.email_hash = private.email_hash(v_email) and x.used_at is null and x.expires_at > now()
+           order by x.id for update) l;
+  if cardinality(v_links) = 0 then return 0; end if;
+  perform 1 from public.houses x
+   where x.created_by = any (v_anons) and x.owner_id is null and x.status <> 'released'
+   order by x.id for update;
+  update public.houses h set owner_id = v_uid, owner_since = now()
+   where h.created_by = any (v_anons) and h.owner_id is null and h.status <> 'released';
+  get diagnostics v_n = row_count;
+  update private.house_links set used_at = now(), used_by = v_uid where id = any (v_links);
   return v_n;
 end $$;
 
@@ -552,6 +650,8 @@ begin
 end $$;
 
 -- B5/C7. Lock order: houses row, then the claim row (the same order as request_house_claim).
+-- The claim is re-read under its row lock and the branch is chosen from its STORED kind. A claim that disappeared in
+-- between (the claimant deleted their account), moved, or is no longer pending is `not_pending`: never a release.
 create function public.admin_resolve_claim(p_claim_id uuid, p_approve boolean, p_reason text) returns void
 language plpgsql security definer set search_path = '' as $$
 declare v_house uuid; h public.houses%rowtype; c public.house_claims%rowtype; v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
@@ -562,9 +662,14 @@ begin
     else raise exception 'forbidden' using errcode = '42501'; end if;
   end if;
   select * into h from public.houses where id = v_house for update;
+  if not found then
+    if private.is_admin(null) then raise exception 'not_pending' using errcode = '22023';
+    else raise exception 'forbidden' using errcode = '42501'; end if;
+  end if;
   if not private.is_admin(h.region_id) then raise exception 'forbidden' using errcode = '42501'; end if;
   select * into c from public.house_claims where id = p_claim_id for update;
-  if c.status <> 'pending' then raise exception 'not_pending' using errcode = '22023'; end if;
+  if not found or c.house_id is distinct from v_house or c.status is distinct from 'pending' then
+    raise exception 'not_pending' using errcode = '22023'; end if;
   if p_approve is null then raise exception 'invalid_input' using errcode = '22023', detail = 'approve'; end if;
   if v_reason is not null and char_length(v_reason) > 200 then
     raise exception 'invalid_input' using errcode = '22023', detail = 'reason'; end if;
@@ -581,8 +686,10 @@ begin
     update public.house_claims set status = 'rejected', reason = 'owner_changed', resolved_by = auth.uid(), resolved_at = now()
      where house_id = h.id and kind = 'removal' and status = 'pending';
     update public.houses set owner_id = c.user_id, owner_since = now() where id = h.id;
-  else
+  elsif c.kind = 'removal' then
     perform private.release_house_core(h.id, auth.uid());
+  else
+    raise exception 'invalid_input' using errcode = '22023', detail = 'kind';   -- fail closed on anything else
   end if;
 end $$;
 
@@ -617,9 +724,10 @@ begin
       from public.subscriptions s where s.region_id = p_region_id;
 end $$;
 
--- C8 banner. Provider limits are per account, so the numbers are global; any aal2 admin (of any region) may read.
+-- Admin Overview: digest emails today against app_settings.digest_daily_cap. Digest mail only (sign-in mail is not in
+-- this table and is not counted). Global numbers (the cap is global); any aal2 admin (of any region) may read.
 create function public.admin_digest_today()
-returns table (sent integer, failed integer, cap integer, provider_daily_limit integer, cap_hit boolean)
+returns table (sent integer, failed integer, cap integer, cap_hit boolean)
 language plpgsql stable security definer set search_path = '' as $$
 #variable_conflict use_column
 declare v_day timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
@@ -630,7 +738,6 @@ begin
     select (select count(*) from private.digest_sends d where d.status = 'sent' and d.sent_at >= v_day)::integer,
            (select count(*) from private.digest_sends d where d.status = 'failed' and d.updated_at >= v_day)::integer,
            (select a.digest_daily_cap::integer from public.app_settings a),
-           100,
            exists (select 1 from private.digest_runs r where r.cap_hit and r.started_at >= v_day);
 end $$;
 
@@ -664,11 +771,18 @@ begin
   return v_id;
 end $$;
 
--- Claim up to p_limit (max 100, and never past the daily cap) recipients with something new, mark them 'sending'
--- and return their content. Skips: anyone already sent or failed in this run, and rows 'sending' for under 10 min
--- (in flight). A stale 'sending' row (crash between send and mark) is returned again with the same idempotency key.
+-- Claim up to p_limit (max 100, and never past the daily cap) recipients and return their content, marked `sending`.
+--  * Resume first: a user's unresolved `sending` row from ANY run whose last touch is over 5 minutes old (a crash, an
+--    ambiguous provider outcome, or a worker that ran out of time) is handed out again with ITS run id, ITS stored
+--    idempotency key and ITS window, so the payload and the key are identical and Resend dedupes it (24 h window).
+--    While such a row exists the user gets nothing new. A resumed row whose window no longer has content is closed as
+--    failed (no_content) instead.
+--  * Then new rows for this run's kind: no row yet in this run, something new in (last_sent_through, window_to]. The
+--    key is digest:<public_id>:<last_sent_through ISO>, stored on the row.
+--  * Cap: one advisory lock per UTC day serializes the read-count-claim across daily and weekly batches.
 create function public.svc_digest_batch(p_run_id uuid, p_limit integer)
-returns table (user_id uuid, email text, idempotency_key text, public_id uuid, token_version integer,
+returns table (run_id uuid, user_id uuid, email text, idempotency_key text, window_to timestamptz,
+               public_id uuid, token_version integer,
                region_slug text, region_name text, timezone text, cadence text,
                houses jsonb, house_total integer, events jsonb, event_total integer)
 language plpgsql security definer set search_path = '' as $$
@@ -676,10 +790,11 @@ language plpgsql security definer set search_path = '' as $$
 declare
   v_run private.digest_runs%rowtype;
   v_day timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
-  v_room integer; v_n integer := 0; c record;
+  v_room integer; v_n integer := 0; c record; v_key text;
 begin
-  select * into v_run from private.digest_runs where run_id = p_run_id for update;
+  select * into v_run from private.digest_runs r where r.run_id = p_run_id for update;
   if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('digest_cap:' || to_char(v_day at time zone 'UTC', 'YYYY-MM-DD'), 0));
   select greatest(0, least(coalesce(p_limit, 100), 100,
            a.digest_daily_cap - (select count(*) from private.digest_sends d
                                   where (d.status = 'sent' and d.sent_at >= v_day)
@@ -687,18 +802,26 @@ begin
     into v_room from public.app_settings a;
   for c in
     select s.user_id, u.email::text as email, s.public_id, s.token_version, r.slug, r.name, r.timezone, s.cadence,
+           coalesce(s.last_sent_through, s.confirmed_at) as w_from,
+           p.run_id as p_run, p.idempotency_key as p_key, coalesce(p.window_to, v_run.window_to) as w_to,
            hs.items as h_items, hs.total as h_total, ev.items as e_items, ev.total as e_total
       from public.subscriptions s
       join auth.users u on u.id = s.user_id
       join public.regions r on r.id = s.region_id
       join public.site_settings ss on ss.region_id = s.region_id
+      left join lateral (
+        select d.run_id, d.idempotency_key, d.window_to, d.updated_at from private.digest_sends d
+         where d.user_id = s.user_id and d.status = 'sending'
+         order by d.created_at limit 1
+      ) p on true
       cross join lateral (
         select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'address', x.address) order by x.created_at desc, x.id)
                         filter (where x.rn <= 10), '[]'::jsonb) as items, count(*)::integer as total
           from (select h.id, h.address, h.created_at, row_number() over (order by h.created_at desc, h.id) as rn
                   from public.houses h
                  where s.houses and h.region_id = s.region_id and h.season = ss.active_season and h.year = ss.active_year
-                   and h.status = 'visible' and h.created_at > s.last_sent_through and h.created_at <= v_run.window_to) x
+                   and h.status = 'visible' and h.created_at > s.last_sent_through
+                   and h.created_at <= coalesce(p.window_to, v_run.window_to)) x
       ) hs
       cross join lateral (
         select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'starts_at', x.starts_at, 'venue', x.venue)
@@ -707,27 +830,44 @@ begin
           from (select e.id, e.title, e.starts_at, e.venue, row_number() over (order by e.starts_at, e.id) as rn
                   from public.events e
                  where s.events and e.region_id = s.region_id and e.season = ss.active_season and e.year = ss.active_year
-                   and e.status = 'approved' and e.approved_at > s.last_sent_through and e.approved_at <= v_run.window_to
-                   and coalesce(e.ends_at, e.starts_at + interval '3 hours') > now()) x
+                   and e.status = 'approved' and e.approved_at > s.last_sent_through
+                   and e.approved_at <= coalesce(p.window_to, v_run.window_to)
+                   -- "still upcoming" is judged at the window's end, not now(), so a resumed send renders the same email
+                   and coalesce(e.ends_at, e.starts_at + interval '3 hours') > coalesce(p.window_to, v_run.window_to)) x
       ) ev
-     where s.status = 'active' and s.cadence = v_run.kind and r.is_active
+     where s.status = 'active' and r.is_active
        and u.email is not null and u.email_confirmed_at is not null
-       and (hs.total > 0 or ev.total > 0)
-       and not exists (select 1 from private.digest_sends d
-                        where d.run_id = p_run_id and d.user_id = s.user_id
-                          and (d.status in ('sent', 'failed') or d.updated_at > now() - interval '10 minutes'))
-     order by s.last_sent_through, s.user_id
+       and case when p.run_id is not null
+                then p.updated_at <= now() - interval '5 minutes'                     -- resume a stale unresolved send
+                else s.cadence = v_run.kind and (hs.total > 0 or ev.total > 0)
+                     and not exists (select 1 from private.digest_sends d
+                                      where d.run_id = p_run_id and d.user_id = s.user_id) end
+     order by (p.run_id is null), s.last_sent_through, s.user_id
      for update of s skip locked
   loop
+    if c.p_run is not null and c.h_total = 0 and c.e_total = 0 then
+      update private.digest_sends d set status = 'failed', error_code = 'no_content', updated_at = now()
+       where d.run_id = c.p_run and d.user_id = c.user_id and d.status = 'sending';
+      update private.digest_runs r set failed = r.failed + 1 where r.run_id = c.p_run;
+      continue;
+    end if;
     if v_n >= v_room then
-      update private.digest_runs set cap_hit = true where run_id = p_run_id;
+      update private.digest_runs r set cap_hit = true where r.run_id = p_run_id;
       exit;
     end if;
-    insert into private.digest_sends as d (run_id, user_id, status, window_to)
-    values (p_run_id, c.user_id, 'sending', v_run.window_to)
-    on conflict on constraint digest_sends_pkey do update set attempts = d.attempts + 1, updated_at = now(), status = 'sending';
+    if c.p_run is not null then
+      update private.digest_sends d set attempts = d.attempts + 1, updated_at = now()
+       where d.run_id = c.p_run and d.user_id = c.user_id and d.status = 'sending';
+      run_id := c.p_run; idempotency_key := c.p_key;
+    else
+      v_key := 'digest:' || c.public_id::text || ':'
+               || to_char(c.w_from at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+      insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to)
+      values (p_run_id, c.user_id, 'sending', v_key, c.w_from, v_run.window_to);
+      run_id := p_run_id; idempotency_key := v_key;
+    end if;
     v_n := v_n + 1;
-    user_id := c.user_id; email := c.email; idempotency_key := p_run_id::text || ':' || c.user_id::text;
+    user_id := c.user_id; email := c.email; window_to := c.w_to;
     public_id := c.public_id; token_version := c.token_version; region_slug := c.slug; region_name := c.name;
     timezone := c.timezone; cadence := c.cadence; houses := c.h_items; house_total := c.h_total;
     events := c.e_items; event_total := c.e_total;
@@ -735,8 +875,10 @@ begin
   end loop;
 end $$;
 
--- After the provider call. ok -> 'sent' and last_sent_through advances to the run's window; else 'failed' with a
--- short code. Only a 'sending' row changes, so a repeated mark is a no-op (returns false).
+-- After a DEFINITE provider outcome. ok -> 'sent' and last_sent_through advances to the row's window; else 'failed'
+-- with a short code. An ambiguous outcome (timeout, network error, 5xx) is never marked: the row stays `sending` and is
+-- resumed with the same key. Only a 'sending' row changes, so a repeated mark is a no-op (returns false). p_run_id is
+-- the row's run (svc_digest_batch returns it; a resumed row can belong to an earlier run).
 create function public.svc_digest_mark(p_run_id uuid, p_user_id uuid, p_ok boolean, p_error_code text) returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare v_to timestamptz;
@@ -778,14 +920,20 @@ language sql stable security definer set search_path = '' as $$
    where s.public_id = p_public_id and s.token_version = p_version
 $$;
 
--- POST only (a GET never calls this). 'stopped' or 'invalid' (unknown, or a version already bumped).
+-- POST only (a GET never calls this). 'stopped', 'already_stopped' (a provider retry of the same one-click POST, or a
+-- second tap), or 'invalid' (unknown id, or a version bumped by a resubscribe). Stopping does NOT bump token_version,
+-- so retries stay recognisable; a resubscribe bumps it and kills every older link.
 create function public.svc_unsubscribe_stop(p_public_id uuid, p_version integer) returns text
 language plpgsql security definer set search_path = '' as $$
+declare v_status text;
 begin
-  update public.subscriptions
-     set status = 'stopped', stopped_at = now(), token_version = token_version + 1, updated_at = now()
+  select status into v_status from public.subscriptions
+   where public_id = p_public_id and token_version = p_version for update;
+  if not found then return 'invalid'; end if;
+  if v_status = 'stopped' then return 'already_stopped'; end if;
+  update public.subscriptions set status = 'stopped', stopped_at = now(), updated_at = now()
    where public_id = p_public_id and token_version = p_version and status = 'active';
-  return case when found then 'stopped' else 'invalid' end;
+  return 'stopped';
 end $$;
 
 -- prefs tokens: change topics/cadence of an active subscription without signing in. 'updated' or 'invalid'.
@@ -802,15 +950,30 @@ begin
   return case when found then 'updated' else 'invalid' end;
 end $$;
 
--- B7/C4: the Edge Function verifies the JWT (user id from the token only, fresh OTP) and then calls this before
--- auth.admin.deleteUser. Admins are refused. Owned houses stay on the map, unowned. Returns how many were unowned.
+-- B7/C4 account deletion, in this order (the delete-account Edge Function):
+--   1. svc_delete_account_check(uid): read-only. 'forbidden' for anyone in public.admins (admins are refused BEFORE
+--      anything changes; their admins row would otherwise cascade away), 'gone' when the auth user no longer exists
+--      (a retry after step 2 succeeded), else 'ok'.
+--   2. auth.admin.deleteUser(uid). This is the atomic cascade point: the FKs delete the subscription, claims, digest
+--      rows and house links (on delete cascade) and unown houses (owner_id on delete set null; the owner_since trigger
+--      clears owner_since). If it fails, nothing has changed.
+--   3. svc_delete_account(uid): idempotent cleanup of anything not covered by an FK (today: nothing, but it re-checks
+--      every table). It refuses to run while the auth user still exists, so it can never strip a live account.
+create function public.svc_delete_account_check(p_user_id uuid) returns text
+language sql stable security definer set search_path = '' as $$
+  select case when p_user_id is null then 'invalid'
+              when exists (select 1 from public.admins a where a.user_id = p_user_id) then 'forbidden'
+              when not exists (select 1 from auth.users u where u.id = p_user_id) then 'gone'
+              else 'ok' end
+$$;
+
 create function public.svc_delete_account(p_user_id uuid) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare v_n integer;
 begin
   if p_user_id is null then raise exception 'invalid_input' using errcode = '22023', detail = 'user'; end if;
-  if exists (select 1 from public.admins a where a.user_id = p_user_id) then
-    raise exception 'forbidden' using errcode = '42501'; end if;
+  if exists (select 1 from auth.users u where u.id = p_user_id) then
+    raise exception 'invalid_input' using errcode = '22023', detail = 'user_exists'; end if;
   update public.houses h set owner_id = null, owner_since = null
    where h.id in (select x.id from public.houses x where x.owner_id = p_user_id order by x.id for update);
   get diagnostics v_n = row_count;
@@ -925,6 +1088,7 @@ grant execute on function public.svc_digest_finish(uuid) to service_role;
 grant execute on function public.svc_unsubscribe_lookup(uuid, integer) to service_role;
 grant execute on function public.svc_unsubscribe_stop(uuid, integer) to service_role;
 grant execute on function public.svc_unsubscribe_set_prefs(uuid, integer, boolean, boolean, text) to service_role;
+grant execute on function public.svc_delete_account_check(uuid) to service_role;
 grant execute on function public.svc_delete_account(uuid) to service_role;
 
 select cron.schedule('tl-sweep-subscribe', '23 4 * * *', $$select private.sweep_subscribe()$$);

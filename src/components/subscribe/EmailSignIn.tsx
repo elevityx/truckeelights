@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toDataError } from '@/lib/data/errors';
 import type { SubscribeApi } from './api';
-import { codeMessage, confirmRedirect, emailProblem, saveNext, sendCode, sendMessage } from './flow';
+import { codeMessage, confirmRedirect, emailProblem, preparePlainSignIn, sendCode, sendMessage } from './flow';
 import { CodeStep, SubBotCheck } from './parts';
 
 type Step = 'email' | 'bot' | 'sending' | 'code' | 'verifying';
@@ -45,8 +45,9 @@ export default function EmailSignIn({
     let live = true;
     const t = token.current;
     token.current = '';
-    // The emailed link carries no `next`; if it is opened in this browser, land back on the account page.
-    saveNext(() => window.sessionStorage, '/account/');
+    // The emailed link carries no `next`: if it is opened in this browser, land back on the account page. A plain
+    // sign-in never applies a Subscribe intent, so any left over from an abandoned Subscribe attempt is dropped.
+    preparePlainSignIn(() => window.sessionStorage);
     void sendCode(api, email.trim(), t, confirmRedirect(window.location.origin, true))
       .then(() => {
         if (!live) return;

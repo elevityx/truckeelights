@@ -71,27 +71,29 @@ export function ageText(iso: string, now: number = Date.now()): string {
   return d === 1 ? '1 day ago' : `${d} days ago`;
 }
 
-// ---- Overview: digest usage (C8) -----------------------------------------------------------------------
+// ---- Overview: digest emails today against the digest daily cap ----------------------------------------
+// Digest mail only. This is our own cap (app_settings.digest_daily_cap), not the email provider's limit: sign-in
+// mail is not counted here, and the provider plan is watched in the provider's dashboard.
 export type UsageLevel = 'ok' | 'warn' | 'full';
 
-/** Whole percent of the provider's daily limit used, clamped to 0-100. */
-export function usagePercent(d: Pick<DigestToday, 'sent' | 'providerDailyLimit'>): number {
-  if (!(d.providerDailyLimit > 0)) return 0;
-  return Math.min(100, Math.round((d.sent / d.providerDailyLimit) * 100));
+/** Whole percent of the digest daily cap used, clamped to 0-100. */
+export function usagePercent(d: Pick<DigestToday, 'sent' | 'cap'>): number {
+  if (!(d.cap > 0)) return 0;
+  return Math.min(100, Math.round((d.sent / d.cap) * 100));
 }
 
-/** warn from 80% of the provider limit; full at the limit. */
-export function usageLevel(d: Pick<DigestToday, 'sent' | 'providerDailyLimit'>): UsageLevel {
-  if (!(d.providerDailyLimit > 0)) return 'ok';
-  const r = d.sent / d.providerDailyLimit;
+/** warn from 80% of the cap; full at the cap. */
+export function usageLevel(d: Pick<DigestToday, 'sent' | 'cap'>): UsageLevel {
+  if (!(d.cap > 0)) return 'ok';
+  const r = d.sent / d.cap;
   return r >= 1 ? 'full' : r >= 0.8 ? 'warn' : 'ok';
 }
 
 /** The banner copy, or null when nothing needs attention. */
 export function usageBanner(d: DigestToday): string | null {
-  if (d.capHit) return 'The digest hit its daily cap and left some people for the next run. Upgrade Resend ($20/mo) to send more.';
-  const l = usageLevel(d);
-  if (l === 'full') return 'Resend\'s daily limit is used up. Sign-in emails may not arrive until tomorrow. Upgrade Resend ($20/mo).';
-  if (l === 'warn') return 'Email use is above 80% of Resend\'s daily limit. Upgrade Resend ($20/mo).';
+  if (d.capHit || usageLevel(d) === 'full') {
+    return `The digest reached its daily cap (${d.cap}) and left some people for the next evening. Raise digest_daily_cap to send more.`;
+  }
+  if (usageLevel(d) === 'warn') return `Digest emails today are above 80% of the daily cap (${d.cap}).`;
   return null;
 }

@@ -11,10 +11,14 @@ export interface DigestEvent { id: string; title: string; starts_at: string; ven
 
 /** One row of `svc_digest_batch(run_id, limit)`. The row is already claimed (`sending`) when it is returned. */
 export interface DigestRecipient {
+  /** The run the `digest_sends` row belongs to: this run, or an earlier one when an unresolved send is resumed. */
+  run_id: string;
   user_id: string;
   email: string;
-  /** `run_id:user_id`, sent as Resend's Idempotency-Key. */
+  /** Stored on the row: `digest:<public_id>:<window start ISO>`, sent as Resend's Idempotency-Key on every attempt. */
   idempotency_key: string;
+  /** End of the row's content window (ISO). Anything time-based in the email derives from it, so a retry is identical. */
+  window_to: string;
   public_id: string;
   token_version: number;
   region_slug: string;
@@ -37,27 +41,40 @@ export interface DigestDb {
   /** `svc_digest_start(kind, run_date)`: the run id; a rerun of the same (kind, Pacific date) resumes the same run. */
   start(kind: Cadence, runDate: string): Promise<string>;
   /**
-   * `svc_digest_batch(run_id, limit)`: claims up to `limit` (max 100) recipients with something new, marks them
-   * `sending`, and never goes past `app_settings.digest_daily_cap` (it sets the run's cap_hit when it stops there).
-   * Rows already sent or failed in this run, and rows in flight (< 10 min), are not returned; a stale `sending` row
-   * is returned again with the same idempotency key.
+   * `svc_digest_batch(run_id, limit)`: claims up to `limit` (max 100) recipients, marks them `sending`, and never goes
+   * past `app_settings.digest_daily_cap` (it sets the run's cap_hit when it stops there). An unresolved `sending` row
+   * from any run that has been idle for 5 minutes is resumed first, with its own run id, key and window; otherwise
+   * people with something new and no row in this run get a new row and key.
    */
   batch(runId: string, limit: number): Promise<DigestRecipient[]>;
-  /** `svc_digest_mark(run_id, user_id, ok, error_code)`: ok -> sent (advances last_sent_through); else failed. */
+  /**
+   * `svc_digest_mark(row run_id, user_id, ok, error_code)` after a DEFINITE outcome: ok -> sent (advances
+   * last_sent_through); else failed. Ambiguous outcomes are not marked (the row stays `sending` and is resumed).
+   */
   mark(runId: string, userId: string, ok: boolean, errorCode: string | null): Promise<boolean>;
   finish(runId: string): Promise<RunTotals>;
 }
 
+export type StopResult = 'stopped' | 'already_stopped' | 'invalid';
+
 export interface UnsubscribeDb {
   lookup(publicId: string, version: number): Promise<Prefs | null>;
-  /** 'stopped', or 'invalid' (unknown id, a bumped version, or already stopped: stopping bumps the version). */
-  stop(publicId: string, version: number): Promise<'stopped' | 'invalid'>;
+  /**
+   * 'stopped'; 'already_stopped' for a retry of the same link (stopping does not bump the version); 'invalid' for an
+   * unknown id or a version bumped by a resubscribe.
+   */
+  stop(publicId: string, version: number): Promise<StopResult>;
   setPrefs(publicId: string, version: number, houses: boolean, events: boolean, cadence: Cadence): Promise<'updated' | 'invalid'>;
 }
 
 export interface AccountDb {
-  /** Unowns houses, deletes the subscription, claims and digest rows. 'forbidden' for anyone in public.admins. */
-  deleteAccount(userId: string): Promise<'ok' | 'forbidden'>;
+  /**
+   * `svc_delete_account_check`: read-only, before anything changes. 'forbidden' for anyone in public.admins, 'gone'
+   * when the auth user no longer exists (a retry after a successful auth delete), else 'ok'.
+   */
+  checkDelete(userId: string): Promise<'ok' | 'forbidden' | 'gone'>;
+  /** `svc_delete_account`: idempotent cleanup AFTER the auth user is deleted (the FKs already did the real work). */
+  cleanupDeleted(userId: string): Promise<void>;
 }
 
 export function serviceClient(url: string): SupabaseClient | null {
@@ -111,7 +128,7 @@ export function unsubscribeDb(sb: SupabaseClient): UnsubscribeDb {
     },
     async stop(publicId, version) {
       const r = await rpc<string>(sb, 'svc_unsubscribe_stop', { p_public_id: publicId, p_version: version });
-      return r === 'stopped' ? 'stopped' : 'invalid';
+      return r === 'stopped' || r === 'already_stopped' ? r : 'invalid';
     },
     async setPrefs(publicId, version, houses, events, cadence) {
       const r = await rpc<string>(sb, 'svc_unsubscribe_set_prefs', {
@@ -124,14 +141,13 @@ export function unsubscribeDb(sb: SupabaseClient): UnsubscribeDb {
 
 export function accountDb(sb: SupabaseClient): AccountDb {
   return {
-    async deleteAccount(userId) {
-      try {
-        await rpc<number>(sb, 'svc_delete_account', { p_user_id: userId }); // returns how many houses were unowned
-        return 'ok';
-      } catch (e) {
-        if (e instanceof RpcError && e.code === '42501') return 'forbidden'; // admins are refused in SQL
-        throw e;
-      }
+    async checkDelete(userId) {
+      const r = await rpc<string>(sb, 'svc_delete_account_check', { p_user_id: userId });
+      if (r === 'ok' || r === 'gone') return r;
+      return 'forbidden'; // admins, and anything unexpected: fail closed
+    },
+    async cleanupDeleted(userId) {
+      await rpc<number>(sb, 'svc_delete_account', { p_user_id: userId }); // returns how many houses it unowned (0)
     },
   };
 }

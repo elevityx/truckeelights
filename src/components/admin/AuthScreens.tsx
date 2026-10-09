@@ -24,7 +24,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-export function LoginScreen({ onDone }: { onDone(): void }) {
+export function LoginScreen({ onDone, notice }: { onDone(): void; notice?: string }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
@@ -52,6 +52,7 @@ export function LoginScreen({ onDone }: { onDone(): void }) {
 
   return (
     <Card title="Back office">
+      {notice && <p className="ok" role="status">{notice}</p>}
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <label className="lbl">
           Email
@@ -122,7 +123,7 @@ export function MfaScreen({ factorId, onDone, onSignOut }: { factorId: string; o
   );
 }
 
-export function PasswordForm() {
+export function PasswordForm({ onChanged, title = 'Change password' }: { onChanged?(): void; title?: string } = {}) {
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [busy, setBusy] = useState(false);
@@ -139,6 +140,7 @@ export function PasswordForm() {
       setPw('');
       setPw2('');
       setMsg({ ok: true, text: 'Password changed.' });
+      onChanged?.();
     } catch (e) {
       setMsg({ ok: false, text: errText(e) });
     } finally {
@@ -148,7 +150,7 @@ export function PasswordForm() {
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <strong>Change password</strong>
+      <strong>{title}</strong>
       <label className="lbl">
         New password (12+ characters)
         <input className="field" type="password" autoComplete="new-password" minLength={12} value={pw} onChange={(e) => setPw(e.target.value)} />
@@ -232,6 +234,19 @@ export function SetupScreen({ onDone, onSignOut }: { onDone(): void; onSignOut()
         </form>
       )}
       <button className="btn ghost" type="button" onClick={onSignOut}>Sign out</button>
+    </Card>
+  );
+}
+
+/** After a password-reset email: set the new password, then sign in normally (password + authenticator). */
+export function RecoveryScreen({ onDone, onSignOut }: { onDone(): void; onSignOut(): void }) {
+  return (
+    <Card title="Reset your password">
+      <p className="fine">
+        Choose a new password. Then sign in with it and your authenticator code to open the back office.
+      </p>
+      <PasswordForm title="New password" onChanged={onDone} />
+      <button className="btn ghost" type="button" onClick={onSignOut}>Cancel and sign out</button>
     </Card>
   );
 }

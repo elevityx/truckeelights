@@ -92,8 +92,9 @@ export default function SubscribeSheet({ ctx, onClose, account }: Props) {
       if (s.choices.houses || s.choices.events) void save(api);
       return;
     }
-    // Keep the choices for the confirm page in case the person taps the emailed link instead (B2).
-    saveChoices(session, s.choices);
+    // Keep the choices for the confirm page in case the person taps the emailed link instead (B2). The intent is
+    // scoped to this address and the Subscribe flow and expires after an hour (takeIntent).
+    saveChoices(session, s.choices, s.email);
     saveNext(session, s.choices.account ? '/account/' : '/subscribed/');
     dispatch({ type: 'submit', signedIn: false });
   };

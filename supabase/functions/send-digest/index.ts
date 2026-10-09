@@ -2,9 +2,11 @@
 // Authority: the bearer is compared in constant time to DIGEST_CRON_SECRET; the service-role key never leaves function env.
 // It calls only svc_digest_* routines. Logs only counts and ids.
 // Env: DIGEST_CRON_SECRET, RESEND_API_KEY, UNSUBSCRIBE_HMAC_SECRET, DIGEST_FROM, SITE_URL. The daily cap is not an env
-// value: the database's app_settings.digest_daily_cap (default 50) is the single source, enforced by svc_digest_batch.
+// value: the database's app_settings.digest_daily_cap (default 500) is the single source, enforced by svc_digest_batch.
+// Bounded: one invocation works for at most BUDGET_MS (~40 s) and MAX_SENDS across all due kinds, then returns with
+// `more: true`; cron fires every 10 minutes through the 18:xx-19:xx Pacific slot, and the next tick continues.
 import { digestDb, serviceClient, type Cadence } from '../_shared/db.ts';
-import { runDigest, type RunConfig, type RunDeps, type RunSummary } from '../_shared/digestRun.ts';
+import { BUDGET_MS, MAX_SENDS, runDigest, type Budget, type RunConfig, type RunDeps, type RunSummary } from '../_shared/digestRun.ts';
 import { json, siteUrl, timingSafeEqual } from '../_shared/http.ts';
 import { dueKinds } from '../_shared/pacific.ts';
 
@@ -43,18 +45,20 @@ export async function handle(req: Request, env: DigestEnv | null, deps: RunDeps)
   try { body = (await req.json()) as { kind?: unknown }; } catch { /* cron may send an empty body */ }
   const now = env.config.now();
   const due = dueKinds(now);
-  // An explicit kind (rehearsal) bypasses the 18:xx Pacific gate but is still bearer-authenticated.
+  // An explicit kind (rehearsal) bypasses the Pacific-slot gate but is still bearer-authenticated.
   const kinds: Cadence[] = body.kind === 'daily' || body.kind === 'weekly' ? [body.kind] : due.kinds;
   if (kinds.length === 0) return json(200, { skipped: 'not_due', runs: [] });
 
+  // One budget for the whole invocation, shared by the daily and (Thursday) weekly runs.
+  const budget: Budget = { deadline: now.getTime() + BUDGET_MS, sendsLeft: MAX_SENDS };
   const runs: RunSummary[] = [];
   try {
-    for (const k of kinds) runs.push(await runDigest(k, due.date, env.config, deps));
+    for (const k of kinds) runs.push(await runDigest(k, due.date, env.config, deps, budget));
   } catch {
     console.error('502 run');
     return json(502, { error: 'unavailable', runs });
   }
-  return json(200, { runs });
+  return json(200, { runs, more: runs.some((r) => r.more) });
 }
 
 if (import.meta.main) {

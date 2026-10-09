@@ -70,19 +70,21 @@ describe('row mapping', () => {
   });
 });
 
-describe('usage banner (C8)', () => {
-  const d = (sent: number, capHit = false) => ({ sent, failed: 0, cap: 50, providerDailyLimit: 100, capHit });
-  it('computes percent and level', () => {
-    expect(usagePercent(d(31))).toBe(31);
-    expect(usagePercent(d(250))).toBe(100);
-    expect(usageLevel(d(79))).toBe('ok');
-    expect(usageLevel(d(80))).toBe('warn');
-    expect(usageLevel(d(100))).toBe('full');
+describe('digest emails today vs the daily cap', () => {
+  const d = (sent: number, capHit = false, cap = 500) => ({ sent, failed: 0, cap, capHit });
+  it('computes percent and level against digest_daily_cap', () => {
+    expect(usagePercent(d(155))).toBe(31);
+    expect(usagePercent(d(2500))).toBe(100);
+    expect(usagePercent(d(5, false, 0))).toBe(0);
+    expect(usageLevel(d(399))).toBe('ok');
+    expect(usageLevel(d(400))).toBe('warn');
+    expect(usageLevel(d(500))).toBe('full');
   });
-  it('warns at 80% and when the cap was hit, with the upgrade copy', () => {
+  it('warns at 80% and at the cap; never claims a provider limit or says to upgrade Resend', () => {
     expect(usageBanner(d(10))).toBeNull();
-    expect(usageBanner(d(80))).toMatch(/Upgrade Resend \(\$20\/mo\)/);
-    expect(usageBanner(d(100))).toMatch(/limit is used up/);
-    expect(usageBanner(d(10, true))).toMatch(/daily cap/);
+    expect(usageBanner(d(400))).toMatch(/80% of the daily cap \(500\)/);
+    expect(usageBanner(d(500))).toMatch(/reached its daily cap/);
+    expect(usageBanner(d(10, true))).toMatch(/reached its daily cap/);
+    for (const n of [400, 500]) expect(usageBanner(d(n))).not.toMatch(/Resend|upgrade|sign-in/i);
   });
 });

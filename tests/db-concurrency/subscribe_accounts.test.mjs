@@ -1,5 +1,6 @@
 // Subscribe + Accounts concurrency (Spec_Subscribe_Accounts §9): two claims on one house, redeeming one house link
-// in parallel, and owner hide racing admin hide/release. LOCAL stack only. Real parallel Postgres sessions through
+// in parallel, owner hide racing admin hide/release, crossed house links (no deadlock), claim resolution racing the
+// claimant's account deletion (never a release), and daily + weekly digest batches sharing the daily cap. LOCAL stack only. Real parallel Postgres sessions through
 // `docker exec <db container> psql`, one transaction each (same harness as vote_house). Accounts are inserted into
 // auth.users directly (fake, local-only), so no email is ever sent. Everything created is deleted afterwards.
 import { test, before, after } from 'node:test';
@@ -149,5 +150,107 @@ test('owner hide/unhide racing admin hide, unhide and release: no deadlock, cons
     const [status, reason, unowned] = row.split('|');
     if (status === 'released') assert.equal(unowned, 'true', 'a released house has no owner');
     if (status === 'visible') assert.equal(reason, '-', 'a visible house has no hidden reason');
+  }
+});
+
+const anonClaims = (uid) => claims(uid, { is_anonymous: true, amr: [{ method: 'anonymous', timestamp: 1 }] });
+const svcTx = (body) => `begin;
+set local role service_role;
+${body}
+commit;`;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('crossed house links (two emails naming two devices in opposite orders) complete in parallel: no deadlock', async () => {
+  for (let it = 0; it < 6; it += 1) {
+    const a = await makeUser(false, true);
+    const b = await makeUser(false, true);
+    const housesA = await makeHouses(3, a.id);
+    const housesB = await makeHouses(3, b.id);
+    const u1 = await makeUser();
+    const u2 = await makeUser();
+    // Link ids in this order make u1's links enumerate (A, B) and u2's (B, A): the crossed order.
+    for (const [dev, user] of [[a, u1], [b, u2], [b, u1], [a, u2]]) {
+      const r = await psql(tx(anonClaims(dev.id), `select public.begin_house_link(${lit(user.email)});`));
+      assert.equal(classify(r), 'ok', r.err);
+    }
+    const results = await Promise.all([u1, u2].map((u) => psql(tx(claims(u.id), `select 'N|' || public.complete_house_link();`))));
+    assert.deepEqual(tally(results), { ok: 2 }, `iteration ${it}: ${results.map((r) => r.err).join(' / ')}`);
+    const linked = results.map((r) => Number(r.out.match(/N\|(\d+)/)?.[1]));
+    assert.equal(linked[0] + linked[1], 6, `iteration ${it}: linked ${linked}`);
+    const all = [...housesA, ...housesB].map(lit).join(',');
+    assert.equal(await qn(`select count(*) from public.houses where id in (${all}) and owner_id in (${lit(u1.id)}, ${lit(u2.id)})`), 6);
+  }
+});
+
+test('admin resolving a claim while the claimant deletes their account: not_pending, never a release', async () => {
+  for (const kind of ['claim', 'removal']) {
+    for (let it = 0; it < 3; it += 1) {
+      const claimant = await makeUser();
+      const other = await makeUser();
+      const [house] = await makeHouses(1);
+      // a 'claim' is on someone else's house; a 'removal' is the claimant's own house
+      const owner = kind === 'claim' ? other.id : claimant.id;
+      await q(`update public.houses set owner_id = ${lit(owner)}, owner_since = now() where id = ${lit(house)}`);
+      const fn = kind === 'claim' ? 'request_house_claim' : 'request_house_removal';
+      const made = await psql(tx(claims(claimant.id), `select public.${fn}(${lit(house)}, 'race');`));
+      assert.equal(classify(made), 'ok', made.err);
+      const claimId = await q(`select id from public.house_claims where house_id = ${lit(house)} and status = 'pending' and kind = ${lit(kind)}`);
+      // The account deletion (the Auth delete cascades to the claim row) holds the row lock and commits after a pause,
+      // so the resolver reads the claim, locks the house, then waits on the claim row and finds it gone.
+      const deleter = psql(`begin;
+delete from auth.users where id = ${lit(claimant.id)};
+select pg_sleep(1.2);
+commit;`);
+      await pause(300);
+      const resolver = psql(tx(adminClaims(), `select public.admin_resolve_claim(${lit(claimId)}, true, null);`));
+      const [d, r] = await Promise.all([deleter, resolver]);
+      assert.equal(classify(d), 'ok', d.err);
+      assert.equal(classify(r), 'not_pending', `${kind} #${it}: ${r.err}`);
+      const row = await q(`select status || '|' || coalesce(owner_id::text, '-') from public.houses where id = ${lit(house)}`);
+      // the house is never released; a deleted claimant's own house is just unowned (FK), someone else's keeps its owner
+      assert.equal(row, kind === 'claim' ? `visible|${other.id}` : 'visible|-', `${kind} #${it}`);
+      assert.equal(await qn(`select count(*) from private.storage_jobs where region_id = ${lit(region)} and done_at is null
+                               and photo_id in (select id from public.photos where house_id = ${lit(house)})`), 0);
+    }
+  }
+});
+
+test('daily and weekly digest batches in parallel never exceed the shared daily cap', async () => {
+  const before = await q('select digest_daily_cap from public.app_settings');
+  const subs = [];
+  const runs = [];
+  try {
+    const [house] = await makeHouses(1); // something new for everyone subscribed to this region's houses
+    for (const cadence of ['daily', 'weekly']) {
+      for (let i = 0; i < 6; i += 1) {
+        const u = await makeUser();
+        subs.push(u.id);
+        await q(`insert into public.subscriptions (user_id, region_id, houses, events, cadence, last_sent_through)
+                 values (${lit(u.id)}, ${lit(region)}, true, false, ${lit(cadence)}, now() - interval '1 hour')`);
+      }
+    }
+    assert.ok(house);
+    for (let it = 0; it < 4; it += 1) {
+      // A fresh, unique pair of runs per iteration (dates far from real ones), and a cap with room for exactly 5.
+      const date = `2099-0${it + 1}-0${it + 1}`;
+      const used = await qn(`select count(*) from private.digest_sends d
+         where (d.status = 'sent' and d.sent_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')
+            or (d.status = 'sending' and d.updated_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')`);
+      await q(`update public.app_settings set digest_daily_cap = ${used + 5}`);
+      const daily = await q(svcTx(`select public.svc_digest_start('daily', ${lit(date)});`));
+      const weekly = await q(svcTx(`select public.svc_digest_start('weekly', ${lit(date)});`));
+      runs.push(daily, weekly);
+      const results = await Promise.all([daily, weekly].map((run) =>
+        psql(svcTx(`select 'N|' || count(*) from public.svc_digest_batch(${lit(run)}, 100);`))));
+      assert.deepEqual(tally(results), { ok: 2 }, results.map((r) => r.err).join(' / '));
+      const got = results.map((r) => Number(r.out.match(/N\|(\d+)/)?.[1]));
+      assert.equal(got[0] + got[1], 5, `iteration ${it}: daily ${got[0]} + weekly ${got[1]} must equal the 5 left under the cap`);
+      // release this iteration's claims so the next one starts from the same people
+      await q(`delete from private.digest_sends where run_id in (${lit(daily)}, ${lit(weekly)})`);
+    }
+  } finally {
+    await q(`update public.app_settings set digest_daily_cap = ${Number(before)}`);
+    if (runs.length) await q(`delete from private.digest_runs where run_id in (${runs.map(lit).join(',')})`);
+    if (subs.length) await q(`delete from public.subscriptions where user_id in (${subs.map(lit).join(',')})`);
   }
 });

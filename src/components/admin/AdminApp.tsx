@@ -14,7 +14,7 @@ import {
 } from '@/lib/data';
 import { supabaseConfigured } from '@/config/public-env';
 import { decideScreen, type AdminScreen } from './gate';
-import { LoginScreen, MfaScreen, NotAdminScreen, SetupScreen } from './AuthScreens';
+import { LoginScreen, MfaScreen, NotAdminScreen, RecoveryScreen, SetupScreen } from './AuthScreens';
 import Console from './Console';
 import './admin.css';
 
@@ -24,6 +24,8 @@ export default function AdminApp() {
   const [ctx, setCtx] = useState<RegionContext | null>(null);
   const [factorId, setFactorId] = useState('');
   const [error, setError] = useState('');
+  /** Notice on the login screen (after a password reset). */
+  const [notice, setNotice] = useState('');
 
   const decide = useCallback(async () => {
     if (!supabaseConfigured()) {
@@ -35,6 +37,7 @@ export default function AdminApp() {
       setCtx(c);
       const hasUser = await adminHasUserSession();
       if (!hasUser) return setScreen('login');
+      const recovery = new URLSearchParams(window.location.search).get('recovery') === '1';
       const { current, next } = await adminAal();
       let isAdmin: boolean | null = null;
       if (current === 'aal2') {
@@ -45,7 +48,7 @@ export default function AdminApp() {
         // A verified factor means a challenge is needed even if `next` was not reported.
         if (f) return setScreen('mfa');
       }
-      setScreen(decideScreen({ hasUser, current, next, isAdmin }));
+      setScreen(decideScreen({ hasUser, current, next, isAdmin, recovery }));
     } catch (e) {
       setError(userMessage(toDataError(e)));
       setScreen('error');
@@ -55,6 +58,18 @@ export default function AdminApp() {
   useEffect(() => {
     const t = setTimeout(() => void decide(), 0);
     return () => clearTimeout(t);
+  }, [decide]);
+
+  // Recovery done: drop the email-code session and the ?recovery flag, then a normal password + authenticator sign-in.
+  const recovered = useCallback(async () => {
+    try {
+      await adminSignOut();
+    } catch {
+      /* fall through */
+    }
+    window.history.replaceState(null, '', '/admin/');
+    setNotice('Password changed. Sign in with your new password and your authenticator code.');
+    await decide();
   }, [decide]);
 
   const signOut = useCallback(async () => {
@@ -81,11 +96,13 @@ export default function AdminApp() {
         </div>
       );
     case 'login':
-      return <div className="adm"><LoginScreen onDone={decide} /></div>;
+      return <div className="adm"><LoginScreen onDone={decide} notice={notice} /></div>;
     case 'mfa':
       return <div className="adm"><MfaScreen factorId={factorId} onDone={decide} onSignOut={signOut} /></div>;
     case 'setup':
       return <div className="adm"><SetupScreen onDone={decide} onSignOut={signOut} /></div>;
+    case 'recovery':
+      return <div className="adm"><RecoveryScreen onDone={() => void recovered()} onSignOut={signOut} /></div>;
     case 'not_admin':
       return <div className="adm"><NotAdminScreen onSignOut={signOut} /></div>;
     case 'console':
