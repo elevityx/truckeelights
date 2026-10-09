@@ -1,8 +1,9 @@
 -- AC1, AC2, AC3: RLS everywhere, no write grants, column allowlist, private schema unreachable,
 -- exact EXECUTE allowlist per API role. R2: photos, storage_jobs, private USAGE for authenticated only.
+-- Votes: vote_events, vote_salts (private), house_vote_totals (public read), the vote RPCs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(55);
+select plan(67);
 
 -- (1) RLS enabled on every table in public and private.
 select is(
@@ -13,7 +14,7 @@ select is(
 select is(
   (select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')),
-  10, 'exactly 10 tables exist in public + private (R1 + photos + storage_jobs)');
+  13, 'exactly 13 tables exist in public + private (R1 + photos + storage_jobs + votes)');
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname::text), '{}')
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -62,6 +63,15 @@ select ok(not has_any_column_privilege('anon', 'private.blocked_terms', 'SELECT'
 select ok(not has_any_column_privilege('authenticated', 'private.blocked_terms', 'SELECT'), 'authenticated cannot SELECT private.blocked_terms');
 select ok(not has_any_column_privilege('anon', 'private.storage_jobs', 'SELECT')
           and not has_any_column_privilege('authenticated', 'private.storage_jobs', 'SELECT'), 'no API role can SELECT private.storage_jobs');
+select ok(not has_any_column_privilege('anon', 'private.vote_events', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'private.vote_events', 'SELECT'), 'no API role can SELECT private.vote_events');
+select ok(not has_any_column_privilege('anon', 'private.vote_salts', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'private.vote_salts', 'SELECT'), 'no API role can SELECT private.vote_salts');
+select ok((select c.relrowsecurity and c.relforcerowsecurity from pg_class c where c.oid = 'private.vote_events'::regclass)
+          and (select c.relrowsecurity and c.relforcerowsecurity from pg_class c where c.oid = 'private.vote_salts'::regclass),
+          'vote_events and vote_salts have RLS enabled and forced');
+select is((select count(*)::int from pg_policies where schemaname = 'private' and tablename in ('vote_events', 'vote_salts')), 0,
+          'vote_events and vote_salts have no policies');
 -- Amendment 1 (AC2): public.photos has NO grants and NO policies for anon/authenticated.
 select ok(not has_any_column_privilege('anon', 'public.photos', 'SELECT')
           and not has_any_column_privilege('authenticated', 'public.photos', 'SELECT'), 'no API role can SELECT any column of public.photos');
@@ -86,6 +96,7 @@ select is(
     where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')
       and has_column_privilege('anon', c.oid, a.attnum, 'SELECT')),
   array['app_settings.default_region_id', 'app_settings.id',
+        'house_vote_totals.house_id', 'house_vote_totals.region_id', 'house_vote_totals.votes',
         'houses.address', 'houses.id', 'houses.lat', 'houses.lng', 'houses.region_id', 'houses.season',
         'houses.status', 'houses.year',
         'region_brands.region_id', 'region_brands.season', 'region_brands.wordmark',
@@ -93,8 +104,14 @@ select is(
         'regions.id', 'regions.is_active', 'regions.max_lat', 'regions.max_lng', 'regions.min_lat',
         'regions.min_lng', 'regions.name', 'regions.slug', 'regions.timezone',
         'site_settings.active_season', 'site_settings.active_year', 'site_settings.photos_open',
-        'site_settings.region_id', 'site_settings.submissions_open', 'site_settings.updated_at'],
+        'site_settings.region_id', 'site_settings.submissions_open', 'site_settings.updated_at',
+        'site_settings.votes_open'],
   'anon readable columns equal the grant allowlist exactly (no photos column: Amendment 1)');
+select ok(not has_column_privilege('anon', 'public.app_settings', 'vote_network_cap', 'SELECT')
+          and not has_column_privilege('authenticated', 'public.app_settings', 'vote_network_cap', 'SELECT'),
+          'app_settings.vote_network_cap has no grant');
+select ok(not has_column_privilege('anon', 'public.house_vote_totals', 'updated_at', 'SELECT'),
+          'house_vote_totals.updated_at is not granted');
 select is(
   (select array_agg(format('%I.%I', c.relname, a.attname) order by c.relname, a.attname)
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -127,6 +144,9 @@ select throws_ok($$insert into private.blocked_terms (term) values ('zzanon')$$,
 select throws_ok('select * from public.admins', '42501', null, 'anon: select public.admins -> 42501');
 select throws_ok('select id from public.photos', '42501', null, 'anon: select public.photos -> 42501');
 select throws_ok('select public.photo_sign_paths(gen_random_uuid())', '42501', null, 'anon: photo_sign_paths -> 42501');
+select throws_ok('select * from private.vote_events', '42501', null, 'anon: select private.vote_events -> 42501');
+select throws_ok($$insert into public.house_vote_totals (house_id, region_id, votes) select id, region_id, 1 from public.houses limit 1$$,
+                 '42501', null, 'anon: insert house_vote_totals -> 42501');
 reset role;
 
 select set_config('request.jwt.claims',
@@ -147,6 +167,10 @@ select throws_ok('select id, public_path from public.photos', '42501', null, 'au
 select throws_ok($$update public.photos set status = 'approved'$$, '42501', null, 'authenticated: update public.photos -> 42501');
 select throws_ok('select public.photo_sign_paths(gen_random_uuid())', '42501', null, 'authenticated: photo_sign_paths -> 42501');
 select throws_ok('select private.run_storage_jobs(1, null)', '42501', null, 'authenticated: private.run_storage_jobs -> 42501');
+select throws_ok('select * from private.vote_events', '42501', null, 'authenticated: select private.vote_events -> 42501');
+select throws_ok('select * from private.vote_salts', '42501', null, 'authenticated: select private.vote_salts -> 42501');
+select throws_ok($$update public.house_vote_totals set votes = 999$$, '42501', null, 'authenticated: update house_vote_totals -> 42501');
+select throws_ok('select private.vote_retention()', '42501', null, 'authenticated: private.vote_retention -> 42501');
 
 -- (9) Direct writes on houses fail with 42501.
 select throws_ok($$insert into public.houses (region_id, season, year, address, normalized_address, lat, lng, coord_source)
@@ -162,7 +186,7 @@ select is(
   (select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')),
-  array['public.get_region_context(text)'],
+  array['public.get_house_photo_counts(uuid)', 'public.get_region_context(text)', 'public.network_probe(text)'],
   'anon can execute exactly the allowlist');
 select is(
   (select coalesce(array_agg(format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) order by format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes))), '{}')
@@ -171,19 +195,28 @@ select is(
   array['public.admin_approve_photo(uuid, text)',
         'public.admin_complete_storage_job(bigint)',
         'public.admin_list_houses(uuid, text, text)',
+        'public.admin_network_cap_status()',
         'public.admin_photo_queue(uuid, text)',
         'public.admin_reject_photo(uuid)',
         'public.admin_release_house(uuid)',
         'public.admin_revoke_photo(uuid)',
         'public.admin_set_house_status(uuid, text, text)',
+        'public.admin_set_network_cap(boolean)',
         'public.admin_set_photos_open(uuid, boolean)',
         'public.admin_set_season(uuid, text, integer, boolean)',
+        'public.admin_set_votes_open(uuid, boolean)',
         'public.admin_storage_jobs(uuid)',
+        'public.admin_void_votes(uuid, timestamp with time zone, uuid)',
+        'public.admin_vote_stats(uuid)',
         'public.admin_whoami(uuid)',
         'public.confirm_photo_upload(uuid)',
+        'public.get_house_photo_counts(uuid)',
         'public.get_region_context(text)',
+        'public.my_vote_status(uuid)',
+        'public.network_probe(text)',
         'public.reserve_photo(uuid)',
-        'public.submit_house(text, text, text, double precision, double precision)'],
+        'public.submit_house(text, text, text, double precision, double precision)',
+        'public.vote_house(uuid, uuid)'],
   'authenticated can execute exactly the allowlist');
 
 -- service_role executes the signer input; nothing else in public beyond the two lists above.
@@ -211,18 +244,21 @@ select is(
   (select array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname))
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname in ('public', 'private') and p.prosecdef),
-  array['private.admin_photo_region', 'private.enqueue_delete_public', 'private.enqueue_rotate',
+  array['private.admin_photo_region', 'private.client_net_hash', 'private.enqueue_delete_public', 'private.enqueue_rotate',
         'private.enqueue_storage_job', 'private.finish_storage_job', 'private.house_is_public',
         'private.is_admin', 'private.lock_photo', 'private.lock_quota', 'private.photo_object_readable',
         'private.photo_upload_allowed', 'private.purge_rehearsal', 'private.reconcile_storage',
         'private.rotate_house_photos', 'private.run_storage_jobs', 'private.set_runner_secret',
         'private.set_storage_runner', 'private.storage_admin_ok', 'private.storage_job_satisfied',
-        'private.storage_object_exists', 'private.sweep_photos', 'private.take_quota',
+        'private.storage_object_exists', 'private.sweep_photos', 'private.take_quota', 'private.vote_retention',
         'public.admin_approve_photo', 'public.admin_complete_storage_job', 'public.admin_list_houses',
-        'public.admin_photo_queue', 'public.admin_reject_photo', 'public.admin_release_house',
-        'public.admin_revoke_photo', 'public.admin_set_house_status', 'public.admin_set_photos_open',
-        'public.admin_set_season', 'public.admin_storage_jobs', 'public.admin_whoami',
-        'public.confirm_photo_upload', 'public.photo_sign_paths', 'public.reserve_photo', 'public.submit_house'],
+        'public.admin_network_cap_status', 'public.admin_photo_queue', 'public.admin_reject_photo',
+        'public.admin_release_house', 'public.admin_revoke_photo', 'public.admin_set_house_status',
+        'public.admin_set_network_cap', 'public.admin_set_photos_open', 'public.admin_set_season',
+        'public.admin_set_votes_open', 'public.admin_storage_jobs', 'public.admin_void_votes',
+        'public.admin_vote_stats', 'public.admin_whoami', 'public.confirm_photo_upload',
+        'public.get_house_photo_counts', 'public.my_vote_status', 'public.network_probe',
+        'public.photo_sign_paths', 'public.reserve_photo', 'public.submit_house', 'public.vote_house'],
   'security definer functions are exactly the intended set');
 select is(
   (select coalesce(array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname)), '{}')
