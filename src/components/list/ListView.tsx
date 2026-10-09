@@ -8,6 +8,7 @@ import ListControls from './ListControls';
 import SortMenu from './SortMenu';
 import type { Sort } from './sortMenu.logic';
 import Meter from '@/components/house/Meter';
+import { RouteAddButton } from '@/components/route/RouteButtons';
 import { VOTE_PRIVACY } from '@/components/house/votePanel.logic';
 import { THEMES } from '@/lib/theme/themes';
 import { firstSegment, groupByStreet, restSegment } from '@/lib/text/address';
@@ -22,6 +23,13 @@ interface Props {
   before?: ReactNode;
   /** The inline Houses · Events · Both switch; below 1024px it opens the list in a control row next to the sort button. */
   layerSwitch?: ReactNode;
+  /** Build my route: the compact add icon on each row. */
+  route?: RowRoute;
+}
+
+export interface RowRoute {
+  has(id: string): boolean;
+  toggle(id: string): void;
 }
 
 const SORT_KEY = 'listSort';
@@ -64,7 +72,9 @@ function VoteRow({ pin, season, rank, top3, onOpen }: { pin: PinView; season: Se
   );
 }
 
-export default function ListView({ season, year, pins, onOpen, before, layerSwitch }: Props) {
+export default function ListView({ season, year, pins, onOpen, before, layerSwitch, route }: Props) {
+  const add = (p: PinView) => (route ? <RouteAddButton inRoute={route.has(p.id)} name={firstSegment(p.address)} onToggle={() => route.toggle(p.id)} /> : null);
+  const li = route ? 'rli' : undefined;
   const t = THEMES[season];
   const [sort, setSortState] = useState<Sort>(savedSort);
   const setSort = (s: Sort) => {
@@ -110,8 +120,9 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
             {voted.length > 0 && (
               <ol className="rank" aria-label="Top voted houses">
                 {voted.map(({ pin, rank }) => (
-                  <li key={pin.id}>
+                  <li key={pin.id} className={li}>
                     <VoteRow pin={pin} season={season} rank={String(rank)} top3={rank <= 3} onOpen={onOpen} />
+                    {add(pin)}
                   </li>
                 ))}
               </ol>
@@ -121,8 +132,9 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
                 <h3>Waiting for their first vote</h3>
                 <ul className="rank">
                   {waiting.map((pin) => (
-                    <li key={pin.id}>
+                    <li key={pin.id} className={li}>
                       <VoteRow pin={pin} season={season} rank="–" top3={false} onOpen={onOpen} />
+                      {add(pin)}
                     </li>
                   ))}
                 </ul>
@@ -135,7 +147,7 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
               <h3>{g.street}</h3>
               <ul>
                 {g.items.map((p) => (
-                  <li key={p.id}>
+                  <li key={p.id} className={li}>
                     <button type="button" className="row" onClick={() => onOpen(p.id)}>
                       <span className="g">
                         <Glyph name={pickGlyph(p.id, season)} />
@@ -146,6 +158,7 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
                       </span>
                       <span />
                     </button>
+                    {add(p)}
                   </li>
                 ))}
               </ul>

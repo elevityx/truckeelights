@@ -24,9 +24,22 @@ export interface MapAdapter {
   fitEvents(pad: Padding): void;
   /** Smoothly center on a point and zoom in to `zoom`. */
   zoomTo(p: LatLng, zoom: number): void;
+  /**
+   * Build my route: numbered badges on the stops' pins, plus a thin straight line through them in order (no road
+   * routing, no Directions API). null clears both. Stops whose pin isn't on the map get no badge but stay in the line.
+   */
+  setRoute(stops: RouteStopPoint[] | null): void;
+  /** The camera's center, or null before the map is built. */
+  getCenter(): LatLng | null;
   /** Reverse-geocode a point. [] when nothing is there; rejects when the lookup itself fails. */
   reverseGeocode(p: LatLng): Promise<GeocodeCandidate[]>;
   destroy(): void;
+}
+export interface RouteStopPoint {
+  kind: 'house' | 'event';
+  id: string;
+  lat: number;
+  lng: number;
 }
 export interface LatLng {
   lat: number;

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import type { PublicEvent, Season } from '@/lib/data/types';
 import ListControls from '@/components/list/ListControls';
+import type { RowRoute } from '@/components/list/ListView';
+import { RouteAddButton } from '@/components/route/RouteButtons';
 import { formatRange, formatTimes, groupEvents } from '@/lib/time/pacific';
 import DateChip from './DateChip';
 import EventGlyph from './EventGlyph';
@@ -68,12 +70,23 @@ interface ListProps {
   onOpen(id: string): void;
   /** Set only while event submissions are open. */
   onAdd?: () => void;
+  /** Build my route: the compact add icon on each row. */
+  route?: RowRoute;
+}
+
+function EventItem({ e, tz, region, onOpen, route }: RowProps & { route?: RowRoute }) {
+  return (
+    <li className={route ? 'rli' : undefined}>
+      <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
+      {route && <RouteAddButton inRoute={route.has(e.id)} name={e.title} onToggle={() => route.toggle(e.id)} />}
+    </li>
+  );
 }
 
 const seasonLabel = (season: Season, year: number) => `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
 /** The Events view: Today · This week · Later, by start time. */
-export function EventsView({ events, tz, region, now, season, year, onOpen, onAdd, layerSwitch }: ListProps & { layerSwitch?: ReactNode }) {
+export function EventsView({ events, tz, region, now, season, year, onOpen, onAdd, layerSwitch, route }: ListProps & { layerSwitch?: ReactNode }) {
   const g = groupEvents(events, now, tz);
   const groups: [string, PublicEvent[]][] = [
     ['Today', g.today],
@@ -99,9 +112,7 @@ export function EventsView({ events, tz, region, now, season, year, onOpen, onAd
                 </h3>
                 <ul>
                   {items.map((e) => (
-                    <li key={e.id}>
-                      <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
-                    </li>
+                    <EventItem key={e.id} e={e} tz={tz} region={region} onOpen={onOpen} route={route} />
                   ))}
                 </ul>
               </section>
@@ -114,7 +125,7 @@ export function EventsView({ events, tz, region, now, season, year, onOpen, onAd
 }
 
 /** The Both view's top section: the next 3 events and a link to all of them. */
-export function UpcomingEvents({ events, tz, region, now, season, onOpen, onAdd, onSeeAll }: Omit<ListProps, 'year'> & { onSeeAll(): void }) {
+export function UpcomingEvents({ events, tz, region, now, season, onOpen, onAdd, onSeeAll, route }: Omit<ListProps, 'year'> & { onSeeAll(): void }) {
   const g = groupEvents(events, now, tz);
   const all = [...g.today, ...g.week, ...g.later];
   return (
@@ -134,9 +145,7 @@ export function UpcomingEvents({ events, tz, region, now, season, onOpen, onAdd,
       ) : (
         <ul className="erows">
           {all.slice(0, 3).map((e) => (
-            <li key={e.id}>
-              <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
-            </li>
+            <EventItem key={e.id} e={e} tz={tz} region={region} onOpen={onOpen} route={route} />
           ))}
         </ul>
       )}

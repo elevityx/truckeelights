@@ -62,3 +62,25 @@ export const InfoIcon = () => (
     <path d="M12 11v5.5M12 7.6v.4" />
   </Svg>
 );
+export const CheckIcon = () => (
+  <Svg w={2.6}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </Svg>
+);
+export const UpIcon = () => (
+  <Svg w={2.4}>
+    <path d="M6 15l6-6 6 6" />
+  </Svg>
+);
+export const DownIcon = () => (
+  <Svg w={2.4}>
+    <path d="M6 9l6 6 6-6" />
+  </Svg>
+);
+export const RouteIcon = () => (
+  <Svg>
+    <circle cx="6" cy="18" r="2.5" />
+    <circle cx="18" cy="6" r="2.5" />
+    <path d="M8.5 18H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5" />
+  </Svg>
+);

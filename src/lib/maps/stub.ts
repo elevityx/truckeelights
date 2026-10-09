@@ -29,6 +29,10 @@ export function createStubAdapter(): MapAdapter {
     showProbe() {},
     zoomTo() {},
     fitEvents() {},
+    setRoute() {},
+    getCenter() {
+      return null;
+    },
     async reverseGeocode() {
       return [];
     },

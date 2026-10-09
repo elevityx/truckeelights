@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { XIcon } from '@/components/shell/Icons';
 import type { PinView, PublicEvent, Region, Season } from '@/lib/data/types';
 import { getMapAdapter } from '@/lib/maps';
 import { findNearbyDuplicate, inRegion, mapPickMessage, pickStreetResult } from '@/lib/maps/mapPick';
 import type { Padding } from '@/lib/maps/eventLayout';
-import type { MapAdapter, PickedPlace } from '@/lib/maps/types';
+import type { LatLng, MapAdapter, PickedPlace, RouteStopPoint } from '@/lib/maps/types';
 import { Fog, Troll } from './Decor';
 
 interface Props {
@@ -25,6 +25,10 @@ interface Props {
   eventsHint?: { houses: boolean; count: number } | null;
   /** Bump to fit the camera to the shown events (the layer switched to Events, or the page opened on it). 0 = never. */
   fitEventsSeq?: number;
+  /** Build my route: numbered stop badges and a straight line while the route panel is open; null hides them. */
+  route?: RouteStopPoint[] | null;
+  /** Filled with a getter for the camera's center (Nearby houses falls back to it when location is denied). */
+  centerRef?: RefObject<(() => LatLng | null) | null>;
 }
 
 type Pop = { kind: 'busy' } | { kind: 'dup'; pin: PinView } | { kind: 'msg'; text: string } | null;
@@ -51,7 +55,7 @@ function fitPadding(wrap: HTMLElement): Padding {
   return { top: top + PIN_H, right: EDGE, bottom: bottom + 16, left: EDGE };
 }
 
-export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt, events = NO_EVENTS, onSelectEvent, eventsHint = null, fitEventsSeq = 0 }: Props) {
+export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt, events = NO_EVENTS, onSelectEvent, eventsHint = null, fitEventsSeq = 0, route = null, centerRef }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const adapter = useRef<MapAdapter | null>(null);
   const pinsRef = useRef(pins);
@@ -62,6 +66,7 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
   const onAddAtRef = useRef(onAddAt);
   const pickRef = useRef(pickEnabled);
   const seq = useRef(0);
+  const routeRef = useRef(route);
   const [pop, setPop] = useState<Pop>(null);
   // The hint fades after the first tap on the map or 10 seconds.
   const [hint, setHint] = useState(true);
@@ -77,6 +82,7 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
     onSelectRef.current = onSelect;
     onAddAtRef.current = onAddAt;
     pickRef.current = pickEnabled;
+    routeRef.current = route;
   });
 
   // Build the map once per season (remount only when the season or region changes).
@@ -136,6 +142,7 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
         a.setPins(pinsRef.current);
         a.setEvents(eventsRef.current, region.timezone);
         if (selRef.current) a.focus(selRef.current);
+        a.setRoute(routeRef.current);
       })
       .catch(() => {
         /* map failed to load; the List view still works */
@@ -163,6 +170,18 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
     const el = host.current?.parentElement;
     if (fitEventsSeq > 0 && el) adapter.current?.fitEvents(fitPadding(el));
   }, [fitEventsSeq]);
+
+  useEffect(() => {
+    adapter.current?.setRoute(route);
+  }, [route]);
+
+  useEffect(() => {
+    if (!centerRef) return;
+    centerRef.current = () => adapter.current?.getCenter() ?? null;
+    return () => {
+      centerRef.current = null;
+    };
+  }, [centerRef]);
 
   useEffect(() => {
     if (selectedId) adapter.current?.focus(selectedId);

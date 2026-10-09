@@ -2,6 +2,7 @@
 
 import Sheet from '@/components/ui/Sheet';
 import { DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
+import { RouteToggle } from '@/components/route/RouteButtons';
 import { publicEnv } from '@/config/public-env';
 import type { PublicEvent, Season } from '@/lib/data/types';
 import { shareOrCopy, shareToast } from '@/lib/share/urls';
@@ -19,10 +20,12 @@ interface Props {
   region: RegionBox;
   onClose(): void;
   onToast(msg: string): void;
+  /** Build my route: every event is at a public venue, so any event can be a stop. */
+  route?: { inRoute: boolean; onToggle(): void };
 }
 
 /** Event details. Every data string renders as React text; nothing is injected as HTML. */
-export default function EventSheet({ event: e, season, year, tz, region, onClose, onToast }: Props) {
+export default function EventSheet({ event: e, season, year, tz, region, onClose, onToast, route }: Props) {
   const far = worthTheDrive(region, e);
   const website = safeWebsite(e.url);
   const share = async () => {
@@ -62,6 +65,7 @@ export default function EventSheet({ event: e, season, year, tz, region, onClose
             <span>{e.address}</span>
           </p>
           <p className="edesc">{e.description}</p>
+          {route && <RouteToggle inRoute={route.inRoute} onToggle={route.onToggle} />}
         </div>
         <div className="sec">
           <div className="eacts">
