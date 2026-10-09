@@ -244,3 +244,13 @@ export async function adminNetworkCapStatus(): Promise<boolean> {
     throw toDataError(e);
   }
 }
+
+/** Global admin only (`forbidden` for a region-only admin). Callers re-read `adminNetworkCapStatus` afterwards. */
+export async function adminSetNetworkCap(on: boolean): Promise<void> {
+  try {
+    const { error } = await getSupabase().rpc('admin_set_network_cap', { p_enabled: on });
+    if (error) throw error;
+  } catch (e) {
+    throw toDataError(e);
+  }
+}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   adminNetworkCapStatus,
+  adminSetNetworkCap,
   adminSetVotesOpen,
   adminVoidVotes,
   adminVoteStats,
@@ -29,6 +30,7 @@ export default function VotesTab({ ctx, onForbidden }: Props) {
   const [sw, setSw] = useState<VotesSwitch>({ kind: 'loading' });
   const [swBusy, setSwBusy] = useState(false);
   const [cap, setCap] = useState<CapState>({ kind: 'loading' });
+  const [capBusy, setCapBusy] = useState(false);
   const [rows, setRows] = useState<AdminVoteRow[] | null>(null);
   const [err, setErr] = useState('');
   const [note, setNote] = useState('');
@@ -100,6 +102,24 @@ export default function VotesTab({ ctx, onForbidden }: Props) {
     void loadCap();
   }
 
+  // Global admin only. Always re-reads the server's answer afterwards, even after an error.
+  async function toggleCap() {
+    if (cap.kind !== 'on' && cap.kind !== 'off') return;
+    setCapBusy(true);
+    setErr('');
+    try {
+      await adminSetNetworkCap(cap.kind === 'off');
+    } catch (e) {
+      const d = toDataError(e);
+      if (d.code !== 'forbidden') setErr(userMessage(d, ctx.region.name));
+    }
+    try {
+      await loadCap(); // forbidden here becomes the "managed by the site owner" state
+    } finally {
+      setCapBusy(false);
+    }
+  }
+
   async function runVoid(row: AdminVoteRow, kind: VoidKind) {
     const a = voidArgs(kind, row, nowMs());
     if (!a) return;
@@ -139,6 +159,15 @@ export default function VotesTab({ ctx, onForbidden }: Props) {
         <span className="chip">{capText(cap)}</span>
         {cap.kind === 'unknown' && (
           <button className="btn ghost" type="button" onClick={() => void loadCap()}>Retry</button>
+        )}
+        {(cap.kind === 'on' || cap.kind === 'off') && (
+          <>
+            <button className="sw" type="button" role="switch" aria-checked={cap.kind === 'on'} disabled={capBusy} onClick={() => void toggleCap()}>
+              <span className="tr" aria-hidden="true" />
+              Network cap: {capBusy ? 'working…' : cap.kind === 'on' ? 'on' : 'off'}
+            </button>
+            <span className="fine">Only turn on after the network check passes.</span>
+          </>
         )}
       </div>
       {capBannerVisible(sw, cap) && (
