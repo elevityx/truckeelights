@@ -5,6 +5,7 @@ import AddHouseSheet from '@/components/add/AddHouseSheet';
 import AddPhotosSheet from '@/components/photos/AddPhotosSheet';
 import HouseSheet from '@/components/house/HouseSheet';
 import ListView from '@/components/list/ListView';
+import { devVotesFixture } from '@/components/house/votesApi';
 import LoreBar from '@/components/lore/LoreBar';
 import MapView from '@/components/map/MapView';
 import Header from '@/components/shell/Header';
@@ -57,10 +58,11 @@ export default function HomePage() {
         return;
       }
       try {
-        const c = await getRegionContext();
+        const fx = await devVotesFixture(); // null outside `next dev` with the votes mock
+        const c = fx?.ctx ?? (await getRegionContext());
         if (cancelled) return;
         applySeason(c.season);
-        const p = await listMapHouses(c.region.id);
+        const p = fx?.pins ?? (await listMapHouses(c.region.id));
         if (cancelled) return;
         setCtx(c);
         setPins(p);
@@ -108,6 +110,10 @@ export default function HomePage() {
       showToast(userMessage(toDataError(e)));
     }
   };
+
+  const onVoted = useCallback((id: string, total: number) => {
+    setPins((ps) => ps.map((p) => (p.id === id && p.votes !== total ? { ...p, votes: total } : p)));
+  }, []);
 
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedId) ?? null, [pins, selectedId]);
 
@@ -186,6 +192,8 @@ export default function HomePage() {
           onToast={showToast}
           onAddPhotos={ctx.photosOpen ? () => setSheet('photos') : undefined}
           photosRefreshKey={photosKey}
+          votesOpen={ctx.votesOpen}
+          onVoted={onVoted}
         />
       )}
       {sheet === 'add' && (

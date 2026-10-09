@@ -128,3 +128,33 @@ export function votesLabel(votes: number): string {
   const v = clean(votes);
   return `${v.toLocaleString('en-US')} ${v === 1 ? 'vote' : 'votes'}`;
 }
+
+export interface Ranked<T> {
+  pin: T;
+  rank: number;
+}
+
+/**
+ * "Top voted" order: raw votes desc, then address A to Z (the photo cap never changes the order).
+ * Competition ranks (1, 2, 2, 4). Houses with 0 votes come back separately, in address order, with no rank.
+ */
+export function rankHouses<T extends { votes: number; address: string }>(pins: readonly T[]): { voted: Ranked<T>[]; waiting: T[] } {
+  const sorted = [...pins].sort((a, b) => clean(b.votes) - clean(a.votes) || a.address.localeCompare(b.address, 'en-US'));
+  const voted: Ranked<T>[] = [];
+  const waiting: T[] = [];
+  let rank = 0;
+  let prev = -1;
+  sorted.forEach((pin, i) => {
+    const v = clean(pin.votes);
+    if (v === 0) {
+      waiting.push(pin);
+      return;
+    }
+    if (v !== prev) {
+      rank = i + 1;
+      prev = v;
+    }
+    voted.push({ pin, rank });
+  });
+  return { voted, waiting };
+}

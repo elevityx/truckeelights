@@ -4,14 +4,19 @@ import { firstSegment } from '@/lib/text/address';
 import { reverseGeocode } from './geocode';
 import { loadGoogle } from './loader';
 import { GLYPHS, PROBES, pickGlyph } from './glyphs';
+import { buildMeter, updateMeter } from './meterEl';
 import type { MapAdapter } from './types';
+import { meterAriaText, powerKind } from '@/lib/votes/meter';
 
 export function createGoogleAdapter(): MapAdapter {
   let map: google.maps.Map | null = null;
   let marker: google.maps.MarkerLibrary | null = null;
   let mounted = false;
   let season: 'halloween' | 'christmas' = 'halloween';
-  const markers = new Map<string, { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; pin: PinView }>();
+  const markers = new Map<
+    string,
+    { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; meter: HTMLElement; pin: PinView }
+  >();
   const listeners = new Set<(id: string) => void>();
   const clickListeners = new Set<(p: { lat: number; lng: number }) => void>();
   let lastPinClick = 0; // a pin tap must never also count as an empty-map tap
@@ -32,22 +37,35 @@ export function createGoogleAdapter(): MapAdapter {
       }
     }
     pins.forEach((pin, i) => {
-      if (markers.has(pin.id)) return;
       const glyphName = pickGlyph(pin.id, season);
+      const kind = powerKind(season, glyphName);
+      const ariaLabel = `${pin.address}. ${meterAriaText(kind, pin.votes, pin.photoCount)}`;
+      const have = markers.get(pin.id);
+      if (have) {
+        // Update path: only the meter and its label change when a count does (a vote, or a reload).
+        if (have.pin.votes !== pin.votes || have.pin.photoCount !== pin.photoCount) {
+          updateMeter(have.meter, pin.votes, pin.photoCount);
+          have.el.setAttribute('aria-label', ariaLabel);
+        }
+        have.pin = pin;
+        return;
+      }
       const alt = glyphName === THEMES[season].altGlyph;
       const el = document.createElement('button');
       el.type = 'button';
       el.className = 'pin pin-adv';
       el.style.setProperty('--g', alt ? THEMES[season].altGlow : THEMES[season].glow);
       el.style.setProperty('--d', `${(-i * 0.73).toFixed(2)}s`);
-      el.setAttribute('aria-label', pin.address);
+      el.setAttribute('aria-label', ariaLabel);
       const g = document.createElement('span');
       g.className = 'glyph';
       g.innerHTML = GLYPHS[glyphName]; // constant string, never data
+      const meter = buildMeter(kind);
+      updateMeter(meter, pin.votes, pin.photoCount);
       const label = document.createElement('span');
       label.className = 'plabel';
       label.textContent = firstSegment(pin.address);
-      el.append(g, label);
+      el.append(g, meter, label);
       const m = new marker!.AdvancedMarkerElement({
         map,
         position: { lat: pin.lat, lng: pin.lng },
@@ -58,7 +76,7 @@ export function createGoogleAdapter(): MapAdapter {
         lastPinClick = Date.now();
         listeners.forEach((cb) => cb(pin.id));
       });
-      markers.set(pin.id, { m, el, pin });
+      markers.set(pin.id, { m, el, meter, pin });
     });
   };
 
