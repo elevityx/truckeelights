@@ -1,4 +1,4 @@
-import type { PinView, Region, Season } from '@/lib/data/types';
+import type { PinView, PublicEvent, Region, Season } from '@/lib/data/types';
 
 export interface MapMountOptions {
   season: Season;
@@ -7,7 +7,10 @@ export interface MapMountOptions {
 export interface MapAdapter {
   mount(el: HTMLElement, o: MapMountOptions): Promise<void>; // builds the map ONCE; call again only after destroy()
   setPins(pins: PinView[]): void; // diff by id; never rebuilds the map
-  focus(id: string): void; // pan to the pin, mark it selected
+  focus(id: string): void; // pan to the pin (house or event), mark it selected
+  /** Event pins, diffed by id like houses. Dates show in `tz`. Labels are set with textContent only. */
+  setEvents(events: PublicEvent[], tz: string): void;
+  onEventSelect(cb: (id: string) => void): () => void; // returns an unsubscribe function
   onPinSelect(cb: (id: string) => void): () => void; // returns an unsubscribe function
   /** Taps on empty map only: never for a pin, a drag, or a pinch. Returns an unsubscribe function. */
   onMapClick(cb: (p: LatLng) => void): () => void;

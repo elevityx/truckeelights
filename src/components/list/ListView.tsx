@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { PinView, Season } from '@/lib/data/types';
 import { pickGlyph } from '@/lib/maps/glyphs';
 import Glyph from './Glyph';
@@ -15,6 +15,8 @@ interface Props {
   year: number;
   pins: PinView[];
   onOpen(id: string): void;
+  /** Shown above the houses (the Both view puts upcoming events here). */
+  before?: ReactNode;
 }
 
 type Sort = 'top' | 'az';
@@ -58,7 +60,7 @@ function VoteRow({ pin, season, rank, top3, onOpen }: { pin: PinView; season: Se
   );
 }
 
-export default function ListView({ season, year, pins, onOpen }: Props) {
+export default function ListView({ season, year, pins, onOpen, before }: Props) {
   const t = THEMES[season];
   const [sort, setSortState] = useState<Sort>(savedSort);
   const setSort = (s: Sort) => {
@@ -72,6 +74,7 @@ export default function ListView({ season, year, pins, onOpen }: Props) {
   if (pins.length === 0) {
     return (
       <div className="list">
+        {before && <div className="list-in">{before}</div>}
         <div className="empty">
           <p className="disp">{t.empty}</p>
         </div>
@@ -83,6 +86,7 @@ export default function ListView({ season, year, pins, onOpen }: Props) {
   return (
     <div className="list">
       <div className="list-in">
+        {before}
         <div className="list-head">
           <div>
             <h2 className="disp">{t.listTitle(pins.length)}</h2>

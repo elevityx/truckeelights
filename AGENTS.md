@@ -21,7 +21,7 @@ Note: `next dev` may rewrite this file (Next.js agent-docs injection). Revert an
 ```bash
 nvm use            # Node version from .nvmrc
 npm ci
-npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, or NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, without the database (dev only)
+npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, or NEXT_PUBLIC_EVENTS_MOCK=1 to preview events, without the database (dev only)
 npm run build      # static export to out/
 npm run lint
 npm run typecheck
@@ -41,7 +41,9 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 - `src/lib/data` (the **only** Supabase caller; events: `events.ts` public read/submit + `eventBounds`, `adminEvents.ts` moderation)
 - `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
 - `src/components/photos` (visitor photo upload sheet, `api.ts` data wiring, `devMock.ts` dev-only mock) and `src/components/house` (house sheet, photo strip, lightbox)
-- `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
+- `src/components/events` (Events v1 public UI: the Houses · Events · Both layer switch (`?layer=`, `localStorage` key `tl:layer`), event list views, event sheet (`?event=<id>`), Add chooser and event form; `api.ts` data wiring, `eventsDevMock.ts` dev-only mock). Shown only when `get_region_context` returns `events`; without it the client makes no events calls.
+- `src/lib/time` (`pacific.ts`: wall-clock conversion in the region's zone with `Intl`, never the device zone; DST gap rejected, fall-back hour takes daylight time; list grouping)
+- `src/lib/maps` (adapter; event pins are a constant glyph plus `textContent` labels; `eventBounds.ts` mirrors SQL `private.event_bounds` and sets the map's camera box), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`)
 - `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
 - `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)

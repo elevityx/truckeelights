@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { XIcon } from '@/components/shell/Icons';
-import type { PinView, Region, Season } from '@/lib/data/types';
+import type { PinView, PublicEvent, Region, Season } from '@/lib/data/types';
 import { getMapAdapter } from '@/lib/maps';
 import { findNearbyDuplicate, inRegion, mapPickMessage, pickStreetResult } from '@/lib/maps/mapPick';
 import type { MapAdapter, PickedPlace } from '@/lib/maps/types';
@@ -17,14 +17,23 @@ interface Props {
   /** Tap-to-add is on only while submissions are open. */
   pickEnabled: boolean;
   onAddAt(place: PickedPlace): void;
+  /** Event pins (already filtered by the layer switch). */
+  events?: PublicEvent[];
+  onSelectEvent?(id: string): void;
+  /** Set when the layer switch shows events: changes the hint. */
+  eventsHint?: { houses: boolean; count: number } | null;
 }
 
 type Pop = { kind: 'busy' } | { kind: 'dup'; pin: PinView } | { kind: 'msg'; text: string } | null;
 
-export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt }: Props) {
+const NO_EVENTS: PublicEvent[] = [];
+
+export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt, events = NO_EVENTS, onSelectEvent, eventsHint = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const adapter = useRef<MapAdapter | null>(null);
   const pinsRef = useRef(pins);
+  const eventsRef = useRef(events);
+  const onSelectEventRef = useRef(onSelectEvent);
   const selRef = useRef(selectedId);
   const onSelectRef = useRef(onSelect);
   const onAddAtRef = useRef(onAddAt);
@@ -39,6 +48,8 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
   }, []);
   useEffect(() => {
     pinsRef.current = pins;
+    eventsRef.current = events;
+    onSelectEventRef.current = onSelectEvent;
     selRef.current = selectedId;
     onSelectRef.current = onSelect;
     onAddAtRef.current = onAddAt;
@@ -58,6 +69,13 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
       setPop(null);
       setHint(false);
       onSelectRef.current(id);
+    });
+    const offEvent = a.onEventSelect((id) => {
+      seq.current++;
+      a.showProbe(null);
+      setPop(null);
+      setHint(false);
+      onSelectEventRef.current?.(id);
     });
     const offClick = a.onMapClick((p) => {
       if (!pickRef.current) return;
@@ -93,6 +111,7 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
     a.mount(el, { season, region })
       .then(() => {
         a.setPins(pinsRef.current);
+        a.setEvents(eventsRef.current, region.timezone);
         if (selRef.current) a.focus(selRef.current);
       })
       .catch(() => {
@@ -101,6 +120,7 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
     return () => {
       live = false;
       off();
+      offEvent();
       offClick();
       a.destroy();
       adapter.current = null;
@@ -112,8 +132,12 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
   }, [pins]);
 
   useEffect(() => {
+    adapter.current?.setEvents(events, region.timezone);
+  }, [events, region.timezone]);
+
+  useEffect(() => {
     if (selectedId) adapter.current?.focus(selectedId);
-  }, [selectedId, pins]);
+  }, [selectedId, pins, events]);
 
   const dismiss = () => {
     seq.current++;
@@ -129,7 +153,15 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
       {H && <Fog />}
       {H && <Troll />}
       <p className={hint && !pop ? 'maphint' : 'maphint gone'} aria-hidden={!hint || !!pop}>
-        {pickEnabled ? (
+        {eventsHint ? (
+          eventsHint.count === 0 ? (
+            'No events yet — know one? Add it.'
+          ) : eventsHint.houses ? (
+            `${pins.length} houses · ${eventsHint.count} events`
+          ) : (
+            `${eventsHint.count} upcoming ${eventsHint.count === 1 ? 'event' : 'events'} · tap one for details`
+          )
+        ) : pickEnabled ? (
           <>
             <span className="hint-long">Tap a {glyph} to see a house · tap the map to add one</span>
             <span className="hint-short">Tap a {glyph} · tap the map to add</span>
