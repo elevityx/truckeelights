@@ -6,6 +6,9 @@ describe('toDataError', () => {
   it('maps a PostgREST message equal to a code', () => {
     expect(toDataError({ message: 'rate_limited' }).code).toBe('rate_limited');
   });
+  it('maps votes_closed from PostgREST (not unknown)', () => {
+    expect(toDataError({ message: 'votes_closed' }).code).toBe('votes_closed');
+  });
   it('copies details into detail', () => {
     const e = toDataError({ message: 'invalid_address', details: 'characters' });
     expect(e.code).toBe('invalid_address');

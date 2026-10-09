@@ -68,3 +68,8 @@
 .seg-b:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
 .confirm .btn{min-height:44px}
 .toast{padding:12px 14px; border-radius:var(--radius); border:1.5px solid currentColor; background:var(--surface)}
+.capline{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.warn-banner{padding:12px 14px; border-radius:var(--radius); border:2px solid #d98a00; background:#fff3d6; color:#4a2f00; font-weight:700}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .warn-banner{background:#3b2a05; color:#ffd98a}}
+:root[data-theme="dark"] .warn-banner{background:#3b2a05; color:#ffd98a}
+.adm tr.flood td{background:color-mix(in srgb,#d98a00 18%,transparent)}

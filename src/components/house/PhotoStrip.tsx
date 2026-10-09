@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { photosApi } from '@/components/photos/api';
 import type { HousePhoto } from '@/lib/data/types';
-import Lightbox from './Lightbox';
+import Lightbox, { type LightboxVote } from './Lightbox';
 import './photos.css';
 
 interface Props {
@@ -12,6 +12,8 @@ interface Props {
   refreshKey: number;
   /** Address first segment, for alt text ("Photo 2 of 10102 Donner Pass Rd"). */
   address?: string;
+  /** Votes on: the lightbox shows a heart that votes for the house. */
+  vote?: LightboxVote;
 }
 
 /** Thumbnails shown in the sheet; the last one opens the rest in the lightbox. */
@@ -19,7 +21,7 @@ const SHOWN = 6;
 
 type Load = { key: string; state: 'loading' } | { key: string; state: 'error' } | { key: string; state: 'ok'; photos: HousePhoto[] };
 
-export default function PhotoStrip({ houseId, refreshKey, address }: Props) {
+export default function PhotoStrip({ houseId, refreshKey, address, vote }: Props) {
   const key = `${houseId}:${refreshKey}`;
   const [load, setLoad] = useState<Load>({ key, state: 'loading' });
   const [open, setOpen] = useState<{ i: number; from: HTMLElement } | null>(null);
@@ -76,7 +78,9 @@ export default function PhotoStrip({ houseId, refreshKey, address }: Props) {
           );
         })}
       </ul>
-      {open && <Lightbox photos={photos} start={open.i} address={where} returnFocus={open.from} onClose={() => setOpen(null)} />}
+      {open && (
+        <Lightbox photos={photos} start={open.i} address={where} returnFocus={open.from} onClose={() => setOpen(null)} vote={vote} />
+      )}
     </>
   );
 }

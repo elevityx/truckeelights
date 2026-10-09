@@ -6,6 +6,7 @@ import type { PinView, Season } from '@/lib/data/types';
 import { houseShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { firstSegment, restSegment } from '@/lib/text/address';
 import PhotoStrip from '@/components/house/PhotoStrip';
+import VotePanel from '@/components/house/VotePanel';
 import { CamIcon, DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
 
 interface Props {
@@ -17,9 +18,11 @@ interface Props {
   /** Set only while photo uploads are open. */
   onAddPhotos?: () => void;
   photosRefreshKey?: number;
+  votesOpen: boolean;
+  /** A vote (or a fresher server count) changed this house's total. */
 }
 
-export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey }: Props) {
+export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey, votesOpen }: Props) {
   const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin.address)}`;
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
@@ -57,7 +60,22 @@ export default function HouseSheet({ pin, season, year, onClose, onToast, onAddP
           </ul>
         </div>
         <div className="sec">
-          <PhotoStrip houseId={pin.id} refreshKey={photosRefreshKey ?? 0} address={firstSegment(pin.address)} />
+          <VotePanel
+            pin={pin}
+            season={season}
+            votesOpen={votesOpen}
+            onToast={onToast}
+            photosOpen={!!onAddPhotos}
+            onAddPhotos={onAddPhotos}
+          />
+        </div>
+        <div className="sec">
+          <PhotoStrip
+            houseId={pin.id}
+            refreshKey={photosRefreshKey ?? 0}
+            address={firstSegment(pin.address)}
+            vote={{ houseId: pin.id, seedTotal: pin.votes, open: votesOpen }}
+          />
         </div>
         <div className="sec">
           <div className="actions">

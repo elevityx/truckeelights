@@ -21,6 +21,7 @@ export interface RegionContext {
   submissionsOpen: boolean;
   wordmark: string;
   photosOpen: boolean;
+  votesOpen: boolean;
 }
 export interface Badge {
   kind: string;
@@ -33,6 +34,7 @@ export interface PinView {
   lat: number;
   lng: number;
   photoCount: number; // R1: 0
+  votes: number;
   badges: Badge[]; // R1: []
 }
 export interface SubmitInput {
@@ -76,6 +78,7 @@ export type DataErrorCode =
   | 'not_approved'
   | 'invalid_image'
   | 'photos_closed'
+  | 'votes_closed'
   | 'auth_failed'
   | 'network'
   | 'unknown';
@@ -114,6 +117,23 @@ export interface StorageJob {
   attempts: number;
   lastError: string | null;
   createdAt: string;
+}
+export interface VoteStatus {
+  totalVotes: number;
+  leftToday: number;
+}
+export interface AdminVoteRow {
+  houseId: string;
+  address: string;
+  totalVotes: number;
+  votesToday: number;
+  votes24h: number;
+  voters24h: number;
+  topVoter: string | null;
+  topVoter24h: number | null;
+  networksToday: number;
+  topNetworkToday: number;
+  voided: number;
 }
 export class DataError extends Error {
   constructor(

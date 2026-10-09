@@ -1,6 +1,6 @@
 import { getSupabase } from '@/lib/supabase/client';
 import { toDataError } from './errors';
-import type { AdminHouse, HouseStatus, Season } from './types';
+import type { AdminHouse, AdminVoteRow, HouseStatus, Season } from './types';
 
 // Owner: WP-D. Every function wraps its errors with toDataError. The database enforces
 // admin + aal2 on every admin RPC; nothing here is a security boundary.
@@ -166,6 +166,89 @@ export async function adminSetHouseStatus(houseId: string, status: 'visible' | '
 export async function adminReleaseHouse(houseId: string): Promise<void> {
   try {
     const { error } = await getSupabase().rpc('admin_release_house', { p_house_id: houseId });
+    if (error) throw error;
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+interface RawVoteRow {
+  house_id: string;
+  address: string;
+  total_votes: number | string;
+  votes_today: number | string;
+  votes_24h: number | string;
+  voters_24h: number | string;
+  top_voter: string | null;
+  top_voter_24h: number | string | null;
+  networks_today?: number | string | null;
+  top_network_today?: number | string | null;
+  voided: number | string;
+}
+
+/** Per-house vote stats. `top_voter_24h` is the top voter's count; a number or null. */
+export async function adminVoteStats(regionId: string): Promise<AdminVoteRow[]> {
+  try {
+    const { data, error } = await getSupabase().rpc('admin_vote_stats', { p_region_id: regionId });
+    if (error) throw error;
+    return ((data ?? []) as RawVoteRow[]).map((r) => ({
+      houseId: r.house_id,
+      address: r.address,
+      totalVotes: Number(r.total_votes ?? 0),
+      votesToday: Number(r.votes_today ?? 0),
+      votes24h: Number(r.votes_24h ?? 0),
+      voters24h: Number(r.voters_24h ?? 0),
+      topVoter: r.top_voter ?? null,
+      topVoter24h: r.top_voter_24h == null ? null : Number(r.top_voter_24h),
+      networksToday: Number(r.networks_today ?? 0),
+      topNetworkToday: Number(r.top_network_today ?? 0),
+      voided: Number(r.voided ?? 0),
+    }));
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+/** Voids votes on a house: since=null,uid=null is a full reset. Returns how many were voided. */
+export async function adminVoidVotes(houseId: string, since: string | null, uid: string | null): Promise<number> {
+  try {
+    const { data, error } = await getSupabase().rpc('admin_void_votes', {
+      p_house_id: houseId,
+      p_since: since,
+      p_uid: uid,
+    });
+    if (error) throw error;
+    return Number(data ?? 0);
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+export async function adminSetVotesOpen(regionId: string, open: boolean): Promise<void> {
+  try {
+    const { error } = await getSupabase().rpc('admin_set_votes_open', { p_region_id: regionId, p_open: open });
+    if (error) throw error;
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+/** Global admin only: a region-only admin gets `forbidden`. Never defaults; errors throw. */
+export async function adminNetworkCapStatus(): Promise<boolean> {
+  try {
+    const { data, error } = await getSupabase().rpc('admin_network_cap_status');
+    if (error) throw error;
+    if (typeof data !== 'boolean') throw new Error('unexpected network cap status');
+    return data;
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+/** Global admin only (`forbidden` for a region-only admin). Callers re-read `adminNetworkCapStatus` afterwards. */
+export async function adminSetNetworkCap(on: boolean): Promise<void> {
+  try {
+    const { error } = await getSupabase().rpc('admin_set_network_cap', { p_enabled: on });
     if (error) throw error;
   } catch (e) {
     throw toDataError(e);

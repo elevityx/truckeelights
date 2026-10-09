@@ -6,3 +6,4 @@ export * from './admin';
 export * from './photos';
 export * from './adminPhotos';
 export * from './storageJobs';
+export * from './votes';

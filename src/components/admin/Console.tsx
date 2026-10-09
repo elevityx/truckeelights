@@ -16,6 +16,7 @@ import {
 } from '@/lib/data';
 import PhotoQueue from './PhotoQueue';
 import SeasonPanel from './SeasonPanel';
+import VotesTab from './VotesTab';
 import StorageJobsBanner from './StorageJobsBanner';
 import { CLEANUP_WARNING, settleCleanup } from './photosState';
 import { SEASON_LABEL } from './seasonState';
@@ -31,7 +32,7 @@ interface Props {
 }
 
 export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
-  const [tab, setTab] = useState<'season' | 'houses' | 'photos'>('season');
+  const [tab, setTab] = useState<'season' | 'houses' | 'photos' | 'votes'>('season');
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
@@ -84,15 +85,16 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
           </div>
         )}
         <div className="tabs" role="tablist" aria-label="Back office sections">
-          {(['season', 'houses', 'photos'] as const).map((k) => (
+          {(['season', 'houses', 'photos', 'votes'] as const).map((k) => (
             <button key={k} type="button" role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : 'Photos'}
+              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : k === 'photos' ? 'Photos' : 'Votes'}
             </button>
           ))}
         </div>
         {tab === 'season' && <SeasonPanel ctx={ctx} onCtx={onCtx} onForbidden={onForbidden} onCleanup={runCleanup} />}
         {tab === 'houses' && <HousesPanel ctx={ctx} onForbidden={onForbidden} onChanged={refreshCount} onCleanup={cleanupAfterAction} />}
         {tab === 'photos' && <PhotoQueue ctx={ctx} onForbidden={onForbidden} onCleanup={cleanupAfterAction} />}
+        {tab === 'votes' && <VotesTab ctx={ctx} onForbidden={onForbidden} />}
       </div>
     </div>
   );

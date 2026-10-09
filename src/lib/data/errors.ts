@@ -4,7 +4,7 @@ const CODES: readonly string[] = [
   'not_signed_in', 'region_not_found', 'submissions_closed', 'invalid_place_id', 'invalid_address',
   'invalid_coordinates', 'out_of_bounds', 'rate_limited', 'forbidden', 'not_found', 'house_released',
   'must_be_hidden', 'invalid_input', 'photo_expired', 'upload_missing', 'not_pending', 'not_approved',
-  'invalid_image', 'photos_closed', 'captcha_failed', 'auth_failed', 'network', 'unknown',
+  'invalid_image', 'photos_closed', 'votes_closed', 'captcha_failed', 'auth_failed', 'network', 'unknown',
 ] satisfies DataErrorCode[];
 
 function isAuthError(e: object): boolean {
@@ -50,6 +50,8 @@ export function userMessage(e: DataError, regionName = 'this'): string {
     case 'not_pending':
     case 'not_approved':
       return 'Someone already handled this photo. Refresh the list.';
+    case 'votes_closed':
+      return 'Voting opens soon.';
     case 'captcha_failed':
       return "The bot check didn't go through. Try it again.";
     case 'network':
