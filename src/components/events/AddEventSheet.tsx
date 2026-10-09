@@ -7,7 +7,7 @@ import { XIcon } from '@/components/shell/Icons';
 import { mapsConfigured } from '@/config/public-env';
 import { toDataError } from '@/lib/data/errors';
 import type { RegionContext } from '@/lib/data/types';
-import { eventBounds, inBounds } from '@/lib/maps/eventBounds';
+import { eventBounds, inEventBounds } from '@/lib/data/events';
 import { reverseGeocode } from '@/lib/maps/geocode';
 import { createAddressPicker, createPinConfirm } from '@/lib/maps/picker';
 import type { PickedPlace } from '@/lib/maps/types';
@@ -63,7 +63,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
   useEffect(() => {
     if (!formShown || !pickerRef.current) return;
     const b = eventBounds(region);
-    const area = { ...region, minLat: b.south, maxLat: b.north, minLng: b.west, maxLng: b.east };
+    const area = { ...region, ...b };
     return createAddressPicker(pickerRef.current, area, (p: PickedPlace) => {
       setPicking(false);
       setGeoNote('');
@@ -90,7 +90,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
       reverseGeocode({ lat, lng }, season)
         .then((rs) => {
           if (n !== geoSeq.current) return;
-          const hit = rs.find((r) => inBounds(eventBounds(region), r));
+          const hit = rs.find((r) => inEventBounds(region, r.lat, r.lng));
           if (!hit) {
             setGeoNote('No address found there. Type the address below.');
             return;

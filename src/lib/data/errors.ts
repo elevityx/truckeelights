@@ -98,6 +98,8 @@ export function eventUserMessage(e: DataError, regionName = 'this'): string {
       return `That spot is outside the ${regionName} events area.`;
     case 'exists':
       return 'Looks like this event is already listed.';
+    case 'invalid_address':
+      return 'Check the address: 5 to 120 characters.';
     case 'invalid_input':
       return (e.detail && EVENT_FIELD_COPY[e.detail]) || 'Check the event details and try again.';
     default:

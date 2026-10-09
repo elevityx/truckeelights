@@ -1,10 +1,11 @@
 // Event-specific copy for server codes (A8). Unknown codes fall back to the shared userMessage.
-import { userMessage, type DataError } from '@/lib/data';
+import { eventUserMessage } from '@/lib/data/errors';
+import type { DataError } from '@/lib/data/types';
 import type { Field } from './eventForm';
 
 export const THANKS = 'Thanks! Your event will appear after a quick review.';
 export const ALREADY_LISTED = 'Looks like this event is already listed.';
-export const QUEUE_FULL = 'We’re catching up on reviews — try again later.';
+export const QUEUE_FULL = "We're catching up on reviews — try again later.";
 
 /** invalid_input detail (a column name) -> the form field to mark. */
 const FIELD_OF: Record<string, Field> = {
@@ -20,46 +21,17 @@ const FIELD_OF: Record<string, Field> = {
   url: 'url',
 };
 
-const FIELD_COPY: Record<Field, string> = {
-  title: 'Check the title: 3 to 80 characters, no < or >.',
-  description: 'Check the description: 10 to 600 characters, no < or >.',
-  venue: 'Check the venue name: 80 characters at most.',
-  address: 'Check the address: 5 to 120 letters, numbers and , . # \' / -',
-  location: 'Pick the place again.',
-  startDate: 'Check the date: from now to 120 days ahead.',
-  startTime: 'Check the start time.',
-  endDate: 'Check the end date.',
-  endTime: 'Check the end: after the start, 31 days at most.',
-  url: 'Check the website link.',
-};
-
 export interface EventErrorCopy {
   message: string;
   field?: Field;
 }
 
+/** Message text comes from `eventUserMessage` (errors.ts); this adds which form field to mark. */
 export function eventErrorCopy(e: DataError, regionName: string): EventErrorCopy {
+  const message = eventUserMessage(e, regionName);
   const code: string = e.code;
-  switch (code) {
-    case 'rate_limited':
-      if (e.detail === 'region_breaker') return { message: 'Lots of events are coming in right now. Try again in a few minutes.' };
-      if (e.detail === 'uid_daily') return { message: 'That’s the most events one person can add today. Try again tomorrow.' };
-      return { message: 'You’ve added a few events already. Try again in an hour.' }; // uid_hourly
-    case 'queue_full':
-      return { message: QUEUE_FULL };
-    case 'submissions_closed':
-      return { message: 'Event submissions open soon.' };
-    case 'out_of_bounds':
-      return { message: `That spot is outside the ${regionName} area.`, field: 'location' };
-    case 'exists':
-      return { message: ALREADY_LISTED };
-    case 'invalid_input': {
-      const field = e.detail ? FIELD_OF[e.detail] : undefined;
-      return field ? { message: FIELD_COPY[field], field } : { message: 'Something in the form needs a fix. Check each field.' };
-    }
-    case 'invalid_address':
-      return { message: FIELD_COPY.address, field: 'address' };
-    default:
-      return { message: userMessage(e, regionName) };
-  }
+  if (code === 'out_of_bounds') return { message, field: 'location' };
+  if (code === 'invalid_address') return { message, field: 'address' };
+  if (code === 'invalid_input' && e.detail && FIELD_OF[e.detail]) return { message, field: FIELD_OF[e.detail] };
+  return { message };
 }

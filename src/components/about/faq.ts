@@ -22,6 +22,10 @@ export const ABOUT_FAQ: readonly AboutFaq[] = [
     a: 'Any decorated house in the Truckee area, including Donner Lake, Tahoe Donner, Glenshire, Northstar, Serene Lakes, Tahoe City, and Kings Beach. It can be your own house or one you enjoyed driving past. Each address appears once per season.',
   },
   {
+    q: 'Can I add an event?',
+    a: 'Yes. Tap Add, then choose An event. Events appear on the map and list after a quick review by a volunteer.',
+  },
+  {
     q: 'When do the Halloween and Christmas maps run?',
     a: 'In the fall the site is Truckee Frights, a map of Halloween houses for trick-or-treating. After Halloween it becomes Truckee Lights, a map of Christmas lights for a holiday light tour. Each season starts a fresh map.',
   },

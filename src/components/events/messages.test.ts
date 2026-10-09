@@ -7,13 +7,13 @@ const copy = (code: string, detail?: string) => eventErrorCopy(new DataError(cod
 describe('eventErrorCopy', () => {
   it('has copy for each rate limit', () => {
     expect(copy('rate_limited', 'uid_hourly').message).toMatch(/hour/);
-    expect(copy('rate_limited', 'uid_daily').message).toMatch(/today/);
+    expect(copy('rate_limited', 'uid_daily').message).toMatch(/daily limit/);
     expect(copy('rate_limited', 'region_breaker').message).toMatch(/few minutes/);
   });
   it('covers queue_full, submissions_closed, out_of_bounds and exists', () => {
     expect(copy('queue_full').message).toBe(QUEUE_FULL);
     expect(copy('submissions_closed').message).toBe('Event submissions open soon.');
-    expect(copy('out_of_bounds')).toEqual({ message: 'That spot is outside the Truckee area.', field: 'location' });
+    expect(copy('out_of_bounds')).toEqual({ message: 'That spot is outside the Truckee events area.', field: 'location' });
     expect(copy('exists').message).toBe(ALREADY_LISTED);
   });
   it('points invalid_input at its field', () => {

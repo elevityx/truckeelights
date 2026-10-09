@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DataError } from '@/lib/data/types';
 import {
-  actionsFor, badgeText, buildEventInput, checkReason, displayHost, emptyForm, eventBounds, eventErrorText, inEventBounds,
-  localToUtc, parseEventUrl, utcToLocal, type EventFormValues,
+  actionsFor, badgeText, buildEventInput, checkReason, displayHost, emptyForm, eventErrorText, 
+  parseEventUrl, type EventFormValues,
 } from './eventsState';
 
 const TZ = 'America/Los_Angeles';
@@ -53,43 +53,6 @@ describe('parseEventUrl (A6)', () => {
     expect(displayHost(null)).toBeNull();
     expect(displayHost('https://example.com/x')).toBe('example.com');
     expect(displayHost('http://evil.test')).toBe('unrecognized link');
-  });
-});
-
-describe('bounds (A3)', () => {
-  it('pads 0.05 and the east edge 0.10', () => {
-    const b = eventBounds(region);
-    expect(b.minLat).toBeCloseTo(39.25);
-    expect(b.maxLng).toBeCloseTo(-120.0);
-    expect(b.minLng).toBeCloseTo(-120.35);
-  });
-  it('rejects outside points and NaN', () => {
-    expect(inEventBounds(region, 39.33, -120.05)).toBe(true);
-    expect(inEventBounds(region, 39.5, -119.8)).toBe(false);
-    expect(inEventBounds(region, NaN, -120.2)).toBe(false);
-  });
-});
-
-describe('Pacific conversion (A2)', () => {
-  it('uses PDT before and PST after the Nov 1 2026 change', () => {
-    expect(localToUtc('2026-10-31', '12:00', TZ)).toBe('2026-10-31T19:00:00.000Z');
-    expect(localToUtc('2026-11-02', '12:00', TZ)).toBe('2026-11-02T20:00:00.000Z');
-  });
-  it('fold hour on Nov 1 takes the earlier offset (PDT)', () => {
-    expect(localToUtc('2026-11-01', '01:30', TZ)).toBe('2026-11-01T08:30:00.000Z');
-  });
-  it('rejects a spring-forward gap', () => {
-    expect(localToUtc('2026-03-08', '02:30', TZ)).toBe('dst_gap');
-    expect(localToUtc('2026-03-08', '03:30', TZ)).toBe('2026-03-08T10:30:00.000Z');
-  });
-  it('rejects garbage and impossible dates', () => {
-    expect(localToUtc('2026-02-30', '10:00', TZ)).toBe('invalid');
-    expect(localToUtc('2026-10-30', '25:00', TZ)).toBe('invalid');
-    expect(localToUtc('', '', TZ)).toBe('invalid');
-  });
-  it('round-trips through utcToLocal', () => {
-    expect(utcToLocal('2026-10-31T19:00:00.000Z', TZ)).toEqual({ date: '2026-10-31', time: '12:00' });
-    expect(utcToLocal('2026-11-02T20:00:00.000Z', TZ)).toEqual({ date: '2026-11-02', time: '12:00' });
   });
 });
 
@@ -148,7 +111,7 @@ describe('buildEventInput', () => {
 describe('eventErrorText', () => {
   it('maps server errors to copy', () => {
     expect(eventErrorText(new DataError('invalid_input', 'transition'), 'x')).toMatch(/no longer allowed/);
-    expect(eventErrorText(new DataError('invalid_input', 'starts_at'), 'x')).toBe('Check the starts at field.');
+    expect(eventErrorText(new DataError('invalid_input', 'starts_at'), 'x')).toMatch(/120 days/);
     expect(eventErrorText(new DataError('not_found'), 'x')).toMatch(/gone/);
     expect(eventErrorText(new DataError('network'), 'fb')).toBe('fb');
   });

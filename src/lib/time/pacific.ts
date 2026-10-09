@@ -104,6 +104,12 @@ export function localTime(t: number, tz: string): string {
   return `${String(w.hour).padStart(2, '0')}:${String(w.minute).padStart(2, '0')}`;
 }
 
+/** ISO UTC instant to `{ date: "YYYY-MM-DD", time: "HH:MM" }` in `tz` (prefills edit forms). */
+export function utcToLocal(iso: string, tz: string): { date: string; time: string } {
+  const t = Date.parse(iso);
+  return { date: localDate(t, tz), time: localTime(t, tz) };
+}
+
 /** Add whole calendar days to "YYYY-MM-DD". */
 export function addDays(ymd: string, n: number): string {
   const m = DATE_RE.exec(ymd);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, dateBadge, formatRange, formatTimes, groupEvents, localDate, startOfDay, toUtc } from './pacific';
+import { addDays, dateBadge, formatRange, formatTimes, groupEvents, localDate, startOfDay, toUtc, utcToLocal } from './pacific';
 
 const LA = 'America/Los_Angeles';
 
@@ -112,5 +112,15 @@ describe('groupEvents', () => {
     const now = Date.parse('2026-10-20T17:00:00Z');
     const g = groupEvents([ev('b', '2026-12-02T01:00:00Z'), ev('a', '2026-12-01T01:00:00Z')], now, LA);
     expect(g.later.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('utcToLocal', () => {
+  it('gives Pacific date and time on both sides of the Nov 1 change', () => {
+    expect(utcToLocal('2026-10-31T19:00:00.000Z', 'America/Los_Angeles')).toEqual({ date: '2026-10-31', time: '12:00' });
+    expect(utcToLocal('2026-11-02T20:00:00.000Z', 'America/Los_Angeles')).toEqual({ date: '2026-11-02', time: '12:00' });
+  });
+  it('rolls the date back across UTC midnight', () => {
+    expect(utcToLocal('2026-11-01T03:30:00.000Z', 'America/Los_Angeles')).toEqual({ date: '2026-10-31', time: '20:30' });
   });
 });

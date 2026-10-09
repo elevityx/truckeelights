@@ -1,6 +1,6 @@
 // Client checks for the event form. UX only: submit_event re-validates everything in the database.
 import type { EventInput, Region } from '@/lib/data/types';
-import { eventBounds, inBounds } from '@/lib/maps/eventBounds';
+import { inEventBounds } from '@/lib/data/events';
 import { DAY_MS, HOUR_MS, toUtc } from '@/lib/time/pacific';
 
 export interface EventDraft {
@@ -90,7 +90,7 @@ export function checkDraft(d: EventDraft, region: Region, now: number): Checked 
   else if (ANGLE.test(venue)) errors.venue = 'Remove the < and > characters.';
 
   if (!d.place) errors.location = 'Search for the place, or drop a pin on the map.';
-  else if (!inBounds(eventBounds(region), d.place)) errors.location = `That spot is outside the ${region.name} area.`;
+  else if (!inEventBounds(region, d.place.lat, d.place.lng)) errors.location = `That spot is outside the ${region.name} area.`;
   const address = collapse(d.address);
   if (d.place) {
     if (address.length < 5 || address.length > 120) errors.address = 'The address must be 5 to 120 characters.';

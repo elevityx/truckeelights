@@ -1,6 +1,9 @@
 // Pure helpers for the admin Events tab (Spec_Events §3.6, Amendment 1 A2/A3/A4/A6/A10). No mini-map.
 // The database re-validates everything; these checks are for fast feedback only.
+import { eventUserMessage } from '@/lib/data/errors';
+import { inEventBounds } from '@/lib/data/events';
 import type { AdminEvent, DataError, EventInput, EventStatus, Region } from '@/lib/data/types';
+import { toUtc, utcToLocal } from '@/lib/time/pacific';
 
 export const FILTERS: EventStatus[] = ['pending', 'approved', 'hidden', 'rejected'];
 export const FILTER_LABEL: Record<EventStatus, string> = { pending: 'Pending', approved: 'Approved', hidden: 'Hidden', rejected: 'Rejected' };
@@ -50,49 +53,13 @@ export function displayHost(raw: string | null): string | null {
   return parseEventUrl(raw) ?? 'unrecognized link';
 }
 
-// ---- Bounds (A3 mirror: bbox +0.05 on every side, east edge +0.10) -------------------------------
-export function eventBounds(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>) {
-  return { minLat: r.minLat - 0.05, maxLat: r.maxLat + 0.05, minLng: r.minLng - 0.05, maxLng: r.maxLng + 0.1 };
-}
-export function inEventBounds(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>, lat: number, lng: number): boolean {
-  const b = eventBounds(r);
-  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng; // NaN fails
-}
-
-// ---- Time (A2): explicit zone, no device zone, DST gap rejected, fold takes the earlier offset -----
-function offsetMinutes(utcMs: number, tz: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
-  }).formatToParts(new Date(utcMs));
-  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value);
-  return Math.round((Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - Math.floor(utcMs / 1000) * 1000) / 60000);
-}
-
-/** `YYYY-MM-DD` + `HH:MM` in `tz` to an ISO UTC string, or 'dst_gap' / 'invalid'. */
-export function localToUtc(date: string, time: string, tz: string): string | 'dst_gap' | 'invalid' {
-  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  const t = /^(\d{2}):(\d{2})$/.exec(time);
-  if (!d || !t) return 'invalid';
-  const [y, mo, da, h, mi] = [+d[1], +d[2], +d[3], +t[1], +t[2]];
-  const asUtc = Date.UTC(y, mo - 1, da, h, mi);
-  const check = new Date(asUtc);
-  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== da || h > 23 || mi > 59) return 'invalid';
-  const offs = new Set([offsetMinutes(asUtc - 86_400_000, tz), offsetMinutes(asUtc + 86_400_000, tz)]);
-  const valid: number[] = [];
-  for (const o of offs) {
-    const utc = asUtc - o * 60_000;
-    if (offsetMinutes(utc, tz) === o) valid.push(utc);
+// ---- Time (A2): the shared Pacific converter; 'invalid' covers malformed or impossible input ------
+function localToUtc(date: string, time: string, tz: string): string | 'dst_gap' | 'invalid' {
+  try {
+    return toUtc(date, time, tz);
+  } catch {
+    return 'invalid';
   }
-  if (valid.length === 0) return 'dst_gap';
-  return new Date(Math.min(...valid)).toISOString();
-}
-
-/** ISO UTC to `{date, time}` in `tz`, for prefilling the edit form. */
-export function utcToLocal(iso: string, tz: string): { date: string; time: string } {
-  const ms = Date.parse(iso);
-  const off = offsetMinutes(ms, tz);
-  const s = new Date(ms + off * 60_000).toISOString();
-  return { date: s.slice(0, 10), time: s.slice(11, 16) };
 }
 
 // ---- Form ----------------------------------------------------------------------------------------
@@ -180,11 +147,8 @@ export function buildEventInput(v: EventFormValues, region: Pick<Region, 'minLat
 // ---- Errors ---------------------------------------------------------------------------------------
 /** Event-specific copy for admin actions; falls back to the caller's generic message. */
 export function eventErrorText(e: DataError, fallback: string): string {
-  if (e.code === 'invalid_input') {
-    if (e.detail === 'transition') return 'That change is no longer allowed. Refresh the list.';
-    return e.detail ? `Check the ${e.detail.replace(/_/g, ' ')} field.` : 'Check the form and try again.';
-  }
+  if (e.code === 'invalid_input' && e.detail === 'transition') return 'That change is no longer allowed. Refresh the list.';
   if (e.code === 'not_found') return 'That event is gone. Refresh the list.';
-  if (e.code === 'out_of_bounds') return 'That spot is outside the map area.';
+  if (e.code === 'invalid_input' || e.code === 'out_of_bounds') return eventUserMessage(e);
   return fallback;
 }
