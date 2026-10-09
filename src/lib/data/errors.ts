@@ -4,7 +4,8 @@ const CODES: readonly string[] = [
   'not_signed_in', 'region_not_found', 'submissions_closed', 'invalid_place_id', 'invalid_address',
   'invalid_coordinates', 'out_of_bounds', 'rate_limited', 'forbidden', 'not_found', 'house_released',
   'must_be_hidden', 'invalid_input', 'photo_expired', 'upload_missing', 'not_pending', 'not_approved',
-  'invalid_image', 'photos_closed', 'votes_closed', 'captcha_failed', 'auth_failed', 'network', 'unknown',
+  'invalid_image', 'photos_closed', 'votes_closed', 'queue_full', 'exists', 'captcha_failed', 'auth_failed',
+  'network', 'unknown',
 ] satisfies DataErrorCode[];
 
 function isAuthError(e: object): boolean {
@@ -52,11 +53,56 @@ export function userMessage(e: DataError, regionName = 'this'): string {
       return 'Someone already handled this photo. Refresh the list.';
     case 'votes_closed':
       return 'Voting opens soon.';
+    case 'queue_full':
+      return "We're catching up on reviews — try again later.";
+    case 'exists':
+      return 'Looks like this event is already listed.';
     case 'captcha_failed':
       return "The bot check didn't go through. Try it again.";
     case 'network':
       return "Can't reach the server. Check your connection.";
     default:
       return 'Something went wrong. Try again.';
+  }
+}
+
+const EVENT_FIELD_COPY: Record<string, string> = {
+  title: 'Give the event a title of 3 to 80 characters, without < or >.',
+  description: 'Describe the event in 10 to 600 characters (up to 6 line breaks, no < or >).',
+  venue: 'Keep the venue name under 80 characters, without < or >.',
+  address: 'Use a place name or street address (5 to 120 letters, numbers, and basic punctuation).',
+  place_id: 'Pick the location again from the suggestions.',
+  coordinates: 'Pick a location on the map.',
+  starts_at: 'Pick a start time from now up to 120 days ahead.',
+  ends_at: 'The end must be after the start and within 31 days of it.',
+  url: 'Use a full https:// website link (no short links, IP addresses, or ports).',
+  source_url: 'Use a full https:// source link (no short links, IP addresses, or ports).',
+  adults_only: 'Choose whether the event is adults only.',
+  transition: 'Someone already changed this event. Refresh the list.',
+  reason: 'Keep the reason under 200 characters.',
+};
+
+/** Event-specific copy (Spec_Events A8). Falls back to userMessage for shared codes. */
+export function eventUserMessage(e: DataError, regionName = 'this'): string {
+  switch (e.code) {
+    case 'rate_limited':
+      if (e.detail === 'uid_hourly') return "You've added a few events already. Try again in an hour.";
+      if (e.detail === 'uid_daily') return "That's the daily limit for adding events. Try again tomorrow.";
+      if (e.detail === 'region_breaker') return 'Lots of events are coming in right now. Try again in a few minutes.';
+      return 'Slow down a little and try again later.';
+    case 'queue_full':
+      return "We're catching up on reviews — try again later.";
+    case 'submissions_closed':
+      return 'Event submissions open soon.';
+    case 'out_of_bounds':
+      return `That spot is outside the ${regionName} events area.`;
+    case 'exists':
+      return 'Looks like this event is already listed.';
+    case 'invalid_address':
+      return 'Check the address: 5 to 120 characters.';
+    case 'invalid_input':
+      return (e.detail && EVENT_FIELD_COPY[e.detail]) || 'Check the event details and try again.';
+    default:
+      return userMessage(e, regionName);
   }
 }

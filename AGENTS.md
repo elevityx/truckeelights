@@ -3,7 +3,7 @@
 Rules for any AI agent (Claude Code, Codex, Cursor, Antigravity) working in this repo. `CLAUDE.md` points here. **Keep this file current**: any change to the stack, commands, data model, or deploy path updates this file in the same commit.
 
 ## What this is
-truckeelights.com is a community map of decorated houses in Truckee, CA. It has two seasonal modes, **Christmas** (lights) and **Halloween**. Visitors add houses and photos. An admin back office picks the active season/theme and moderates photos.
+truckeelights.com is a community map of decorated houses in Truckee, CA. It has two seasonal modes, **Christmas** (lights) and **Halloween**. Visitors add houses, photos, and seasonal events. An admin back office picks the active season/theme and moderates photos and events.
 
 ## Status (2026-10)
 The Supabase rewrite and Release 2 (photos) are live on `main`. There is no Firebase code. House Votes is integrated on `votes/integration` (PR #16) and goes live when it merges to `main`.
@@ -21,7 +21,7 @@ Note: `next dev` may rewrite this file (Next.js agent-docs injection). Revert an
 ```bash
 nvm use            # Node version from .nvmrc
 npm ci
-npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, or NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, without the database (dev only)
+npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, or NEXT_PUBLIC_EVENTS_MOCK=1 to preview events, without the database (dev only)
 npm run build      # static export to out/
 npm run lint
 npm run typecheck
@@ -38,11 +38,13 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 ## Layout
 - `src/app` (pages: `/` map, `/about/` static About + FAQ, `/flyer/` and `/admin/` noindex), `src/components`
 - `src/lib/seo` (JSON-LD builders). `public/sitemap.xml` and `public/robots.txt` are hand-written: add every new indexable page to the sitemap, and keep `/admin/` and `/flyer/` out of it.
-- `src/lib/data` (the **only** Supabase caller)
+- `src/lib/data` (the **only** Supabase caller; events: `events.ts` public read/submit + `eventBounds`, `adminEvents.ts` moderation)
 - `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
 - `src/components/photos` (visitor photo upload sheet, `api.ts` data wiring, `devMock.ts` dev-only mock) and `src/components/house` (house sheet, photo strip, lightbox)
-- `src/lib/maps` (adapter), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
-- `src/components/admin` (admin back office at `/admin/`)
+- `src/components/events` (Events v1 public UI: the Houses · Events · Both layer switch (`?layer=`, `localStorage` key `tl:layer`), event list views, event sheet (`?event=<id>`), Add chooser and event form; `api.ts` data wiring, `eventsDevMock.ts` dev-only mock). Shown only when `get_region_context` returns `events`; without it the client makes no events calls.
+- `src/lib/time` (`pacific.ts`: wall-clock conversion in the region's zone with `Intl`, never the device zone; DST gap rejected, fall-back hour takes daylight time; list grouping)
+- `src/lib/maps` (adapter; event pins are a constant glyph plus `textContent` labels; the map's camera box comes from `eventBounds` in `src/lib/data/events.ts`, the one TS mirror of SQL `private.event_bounds`), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
+- `src/components/admin` (admin back office at `/admin/`; the Events tab is `EventsTab.tsx` with pure helpers and tests in `eventsState.ts`, wired to `src/lib/data/adminEvents.ts`)
 - `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
 - `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)
 - `public/og/{halloween,christmas}.png` (1200×630 social cards; site-wide OG/Twitter meta in `src/app/layout.tsx`). Source is `scripts/og/card.html`; regenerate with `node scripts/og/render.mjs` (needs local Chrome; not part of the build)
@@ -58,7 +60,7 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 1. There are no table write grants. Public writes go only through the exposed RPCs, and internal functions live in the `private` schema, which isn't exposed. Every table in every schema has RLS enabled.
 2. Each region has one `site_settings` row, and the public sees only its active `(season, year)`. Pins from past seasons are hidden, never deleted.
 3. Photos stay hidden until an admin approves them. The public UI never lists storage directly.
-4. Deduplication happens in the database, through unique keys per `(region, season, year)`, never only in the client.
+4. Deduplication happens in the database, through unique keys per `(region, season, year)`, never only in the client. Events dedupe on `(region, season, year, normalized_title, starts_at)` for non-rejected rows.
 5. **Secrets**: only public values (the Supabase URL, the publishable key, the referrer-restricted Maps key) may appear in client code or `NEXT_PUBLIC_*`. Never commit a service-role key, a database password, or real `.env*` files. A sanitized `.env.example` with local-stack values only is allowed. Hosted values live in the host's env settings, never in the repo.
 6. **No HTML strings built from data.** Render through React or `textContent`, never `innerHTML`.
 7. Schema changes go through versioned migrations under `supabase/migrations/`. Don't make ad-hoc changes in the dashboard.
@@ -68,10 +70,11 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 11. A state change that ends public reads of a photo (revoke, release, hide, season switch, reject, expiry) enqueues its storage job **in the same transaction**. A job is done only when `storage.objects` confirms the new state, never on an HTTP status. Photo paths take locks in one order: per-photo advisory lock, then the `photos` row, then `storage_jobs` rows.
 12. The `net` and `vault` schemas are never exposed through the Data API (`[api] schemas` stays `["public"]`). `public.photos` has no grants or policies for API roles; the public reads photos only through the signer.
 13. Raw IP addresses are never stored, logged, or returned by the vote path; only a 16-byte salted hash is kept, and retention nulls it and destroys the salt after the region-local day ends, so past hashes are unlinkable. Vote paths take locks in one order: the region's `site_settings` row (FOR KEY SHARE), the voted house's `houses` row (FOR SHARE, so a concurrent hide/release/revoke waits for the vote or is seen as `not_found`), for a photo heart the photo's `photos` row (FOR SHARE), per-device advisory lock, salt row, per-network advisory lock, the house's `house_vote_totals` row, per-region advisory lock, then ledger rows. Never take them in another order.
+14. Events: `public.events` has FORCE RLS, a column grant without `source_url` or moderation fields, and one SELECT policy (approved, active pair, active region, not ended). All writes go through `submit_event` and the `admin_*_event` RPCs. `site_settings.events_open` gates submissions only. A client that gets no `events` key from `get_region_context` must not call any events relation or RPC. Event URLs pass `private.valid_event_url` in every write path. `submit_event` takes locks in one order: the `event:uid` then `event:region` advisory locks, then the region's `site_settings` row `FOR SHARE` (so `admin_set_events_open` and `admin_set_season`, which update that row, cannot interleave), and only then does it read `events_open` and the active season/year, insert, and take quota. `admin_set_season` (site_settings FOR UPDATE, then houses/photos) and `vote_house` (site_settings FOR KEY SHARE, then vote locks) take no event lock, so the order has no cycle; never take an `event:*` advisory lock after touching `site_settings`. The 40-pending cap counts every pending row in the region (any season/year), and the admin queue/counts show them all. Client URL checks use the one shared `src/lib/data/eventUrl.ts` (mirror of `valid_event_url`).
 
 **CI** (`.github/workflows/ci.yml`): runs on PRs and pushes with no secrets and no `pull_request_target`, actions pinned by SHA. Job `web` runs lint, typecheck, tests, build, `npm audit --omit=dev --audit-level=high`, and a privacy grep. Job `db` starts the local stack with `npm run db:start`, then runs `npm run db:reset` (reset plus the local runner setup), pgTAP, `npm run test:concurrency`, and `npm run test:storage` (serialized; never in parallel with the concurrency tests).
 
-**Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch. The admin re-encode on approve runs in the admin's browser: the server verifies the approved object exists in the right house folder, not that it was re-encoded. Revocation takes seconds while the admin page is open (it runs the jobs itself) and up to about 1 min on the cron retry otherwise, plus CDN propagation. Votes are per anonymous device, so someone who clears site data gets fresh votes; the per-network cap, the flood breakers, admin voiding, and the kill switch bound the damage but cannot make a vote a proof of a person. Anyone can ask the signer for 1-hour URLs of approved photos of public houses (they're public by design).
+**Known limits**: the server checks the shape of an address (house number, real street word, inside the region's bounding box, deduplicated), but can't prove Google returned the place or that the house exists. Admins hide bad entries, and the per-region submissions switch is the kill switch. Events are the same: the server checks shape, bounds, and URL form, not that the event is real; every community event waits in the admin queue, and `events_open` is the kill switch. The admin re-encode on approve runs in the admin's browser: the server verifies the approved object exists in the right house folder, not that it was re-encoded. Revocation takes seconds while the admin page is open (it runs the jobs itself) and up to about 1 min on the cron retry otherwise, plus CDN propagation. Votes are per anonymous device, so someone who clears site data gets fresh votes; the per-network cap, the flood breakers, admin voiding, and the kill switch bound the damage but cannot make a vote a proof of a person. Anyone can ask the signer for 1-hour URLs of approved photos of public houses (they're public by design).
 
 **PR rule**: any PR that changes stack, commands, env vars, layout, schema/RLS/grants, CI, or deploy updates this file in the same PR.
 

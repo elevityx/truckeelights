@@ -37,3 +37,12 @@ describe('About FAQ markup', () => {
     expect(removal?.link?.href).toBe('https://github.com/elevityx/truckeelights/issues/new?template=remove-house.yml');
   });
 });
+
+describe('About FAQ events entry', () => {
+  it('answers "Can I add an event?" and keeps it in the FAQPage markup', () => {
+    const page = JSON.parse(jsonLdString(faqPage(faqForSchema(), 'https://truckeelights.com/about/')));
+    const q = page.mainEntity.find((m: { name: string }) => m.name === 'Can I add an event?');
+    expect(q.acceptedAnswer.text).toMatch(/Tap Add/);
+    expect(q.acceptedAnswer.text).toMatch(/quick review/);
+  });
+});

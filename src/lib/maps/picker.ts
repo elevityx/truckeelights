@@ -17,6 +17,20 @@ function randomId(n: number): string {
 export interface PickerOptions {
   /** Move focus into the search box once it exists, unless the user already moved focus elsewhere. */
   focus?: boolean;
+  /**
+   * Accept only places with at least one of these Google place types (events: venues, parks, plazas, street
+   * addresses). A pick with none of them calls `onReject` instead of `onPick`. Houses leave this unset and keep
+   * their own street-level check.
+   */
+  allowTypes?: readonly string[];
+  onReject?: (p: PickedPlace) => void;
+}
+
+/** Spec_Events A3: what the event autocomplete accepts (a town or a bare route is not a place to go). */
+export const EVENT_PLACE_TYPES: readonly string[] = ['street_address', 'premise', 'subpremise', 'establishment', 'park', 'point_of_interest', 'tourist_attraction'];
+
+export function placeTypeAllowed(types: readonly string[], allow: readonly string[] | undefined): boolean {
+  return allow === undefined || types.some((t) => allow.includes(t));
 }
 
 function focusIfIdle(target: HTMLElement, host: HTMLElement) {
@@ -79,13 +93,15 @@ export function createAddressPicker(
           const place = prediction.toPlace();
           await place.fetchFields({ fields: ['id', 'formattedAddress', 'location', 'types'] });
           if (dead || !place.id || !place.formattedAddress || !place.location) return;
-          onPick({
+          const picked: PickedPlace = {
             placeId: place.id,
             address: place.formattedAddress,
             lat: place.location.lat(),
             lng: place.location.lng(),
             types: place.types ?? [],
-          });
+          };
+          if (placeTypeAllowed(picked.types, o.allowTypes)) onPick(picked);
+          else o.onReject?.(picked);
         } catch {
           /* a failed place lookup leaves the user on the search step */
         }
@@ -105,6 +121,29 @@ export function createAddressPicker(
   };
 }
 
+type Box = { minLat: number; maxLat: number; minLng: number; maxLng: number };
+
+/** The box the pin-confirm map may show. Houses: region + 0.05 deg all round. Events pass eventBounds(region) as is. */
+export function pinBox(region: Region, bounds?: Box): Box {
+  return bounds ?? { minLat: region.minLat - 0.05, maxLat: region.maxLat + 0.05, minLng: region.minLng - 0.05, maxLng: region.maxLng + 0.05 };
+}
+
+/** The google.maps.MapOptions for the pin-confirm map (exported so a test can pin the restriction). */
+export function pinMapOptions(region: Region, season: Season, start: { lat: number; lng: number }, bounds?: Box) {
+  const b = pinBox(region, bounds);
+  return {
+    mapId: THEMES[season].mapId(),
+    center: start,
+    zoom: 18,
+    colorScheme: 'DARK' as google.maps.ColorScheme,
+    disableDefaultUI: true,
+    zoomControl: true,
+    gestureHandling: 'greedy' as const,
+    clickableIcons: false,
+    restriction: { latLngBounds: { north: b.maxLat, south: b.minLat, east: b.maxLng, west: b.minLng }, strictBounds: false },
+  };
+}
+
 /** Small draggable-pin map for the confirm step; coordinate text only when Maps is not configured. */
 export function createPinConfirm(
   el: HTMLElement,
@@ -112,6 +151,7 @@ export function createPinConfirm(
   season: Season,
   start: { lat: number; lng: number },
   onMove: (lat: number, lng: number) => void,
+  bounds?: Box,
 ): () => void {
   if (!mapsConfigured(season)) return () => {};
 
@@ -125,20 +165,7 @@ export function createPinConfirm(
       div = document.createElement('div');
       div.style.cssText = 'position:absolute;inset:0';
       el.appendChild(div);
-      const map = new maps.Map(div, {
-        mapId: THEMES[season].mapId(),
-        center: start,
-        zoom: 18,
-        colorScheme: 'DARK' as google.maps.ColorScheme,
-        disableDefaultUI: true,
-        zoomControl: true,
-        gestureHandling: 'greedy',
-        clickableIcons: false,
-        restriction: {
-          latLngBounds: { north: region.maxLat + 0.05, south: region.minLat - 0.05, east: region.maxLng + 0.05, west: region.minLng - 0.05 },
-          strictBounds: false,
-        },
-      });
+      const map = new maps.Map(div, pinMapOptions(region, season, start, bounds));
       const pin = document.createElement('button');
       pin.type = 'button';
       pin.className = 'minipin';

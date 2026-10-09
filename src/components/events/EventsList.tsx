@@ -1,0 +1,137 @@
+import type { PublicEvent, Season } from '@/lib/data/types';
+import { formatRange, formatTimes, groupEvents } from '@/lib/time/pacific';
+import DateChip from './DateChip';
+import EventGlyph from './EventGlyph';
+import { ChevIcon } from './EventIcons';
+import { townOf } from './links';
+
+interface RowProps {
+  e: PublicEvent;
+  tz: string;
+  onOpen(id: string): void;
+}
+
+export function EventRow({ e, tz, onOpen }: RowProps) {
+  const town = townOf(e.address);
+  return (
+    <button
+      type="button"
+      className="erow"
+      onClick={() => onOpen(e.id)}
+      aria-label={`${e.title}, ${formatRange(e.startsAt, e.endsAt, tz)}${town ? `, ${town}` : ''}${e.adultsOnly ? ', adults only, 21 and over' : ''}`}
+    >
+      <DateChip iso={e.startsAt} tz={tz} />
+      <span className="info" aria-hidden="true">
+        <strong>{e.title}</strong>
+        <span className="meta">
+          <span>
+            {formatTimes(e.startsAt, e.endsAt, tz)}
+            {town && ` · ${town}`}
+          </span>
+          {e.adultsOnly && <span className="t21">21+</span>}
+        </span>
+      </span>
+      <span className="chev" aria-hidden="true">
+        <ChevIcon />
+      </span>
+    </button>
+  );
+}
+
+function EmptyEvents({ season, onAdd }: { season: Season; onAdd?: () => void }) {
+  return (
+    <div className="eempty">
+      <EventGlyph season={season} />
+      <p>No events yet — know one? Add it.</p>
+      {onAdd && (
+        <button type="button" className="btn primary" onClick={onAdd}>
+          Add an event
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface ListProps {
+  events: PublicEvent[];
+  tz: string;
+  now: number;
+  season: Season;
+  year: number;
+  onOpen(id: string): void;
+  /** Set only while event submissions are open. */
+  onAdd?: () => void;
+}
+
+const seasonLabel = (season: Season, year: number) => `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
+
+/** The Events view: Today · This week · Later, by start time. */
+export function EventsView({ events, tz, now, season, year, onOpen, onAdd }: ListProps) {
+  const g = groupEvents(events, now, tz);
+  const groups: [string, PublicEvent[]][] = [
+    ['Today', g.today],
+    ['This week', g.week],
+    ['Later', g.later],
+  ];
+  const total = g.today.length + g.week.length + g.later.length;
+  return (
+    <div className="list">
+      <div className="list-in">
+        <div className="list-head">
+          <h2 className="disp">Upcoming events</h2>
+          <p>{seasonLabel(season, year)} · Pacific time</p>
+        </div>
+        {total === 0 && <EmptyEvents season={season} onAdd={onAdd} />}
+        {groups.map(
+          ([label, items]) =>
+            items.length > 0 && (
+              <section key={label} className="grp" aria-label={label}>
+                <h3>
+                  {label} <span className="gn">{items.length}</span>
+                </h3>
+                <ul>
+                  {items.map((e) => (
+                    <li key={e.id}>
+                      <EventRow e={e} tz={tz} onOpen={onOpen} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ),
+        )}
+        <p className="land-ack">Truckee sits on the ancestral homeland of the Washoe (Wašiw) people.</p>
+      </div>
+    </div>
+  );
+}
+
+/** The Both view's top section: the next 3 events and a link to all of them. */
+export function UpcomingEvents({ events, tz, now, season, onOpen, onAdd, onSeeAll }: Omit<ListProps, 'year'> & { onSeeAll(): void }) {
+  const g = groupEvents(events, now, tz);
+  const all = [...g.today, ...g.week, ...g.later];
+  return (
+    <section className="upcoming" aria-label="Upcoming events">
+      <div className="list-head">
+        <h2 className="disp">Upcoming events</h2>
+        {all.length > 3 ? (
+          <button type="button" className="linkbtn" onClick={onSeeAll}>
+            See all events
+          </button>
+        ) : (
+          all.length > 0 && <p>Next {all.length}</p>
+        )}
+      </div>
+      {all.length === 0 ? (
+        <EmptyEvents season={season} onAdd={onAdd} />
+      ) : (
+        <ul className="erows">
+          {all.slice(0, 3).map((e) => (
+            <li key={e.id}>
+              <EventRow e={e} tz={tz} onOpen={onOpen} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,97 @@
+/* Events v1: layer switch, event pins, list rows, event sheet, Add chooser and event form. Ported from the Events mockup. */
+:root[data-theme="halloween"]{ --ev:#FF7A1A; --on-ev:#140A1F; }
+:root[data-theme="christmas"]{ --ev:#E0393E; --on-ev:#FFFFFF; }
+
+/* ---------- Layer switch ---------- */
+/* Wide screens: a segmented control in the quiet bar. Narrower: a chip row under the bar. */
+.bar-layer{display:none}
+.layerseg button{display:inline-flex; align-items:center; gap:2px; min-height:40px; padding:0 14px; font-size:14.5px; white-space:nowrap}
+.layerseg .n,.layerchips .n{font-weight:400; opacity:.75; margin-left:4px; font-variant-numeric:tabular-nums}
+.layerchips{flex:none; position:relative; z-index:9; display:flex; gap:8px; padding:24px 16px 8px; background:var(--bar-b); border-bottom:1px solid var(--line); overflow-x:auto}
+.bar + .layerchips{padding-top:26px} /* clears the drip / lights trim that hangs under the bar */
+.layerchips button{flex:none; display:inline-flex; align-items:center; min-height:40px; padding:0 16px; border-radius:999px; border:1px solid var(--line); background:var(--surface); color:var(--muted); font-weight:700; font-size:14px; cursor:pointer}
+.layerchips button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.layerchips button[aria-pressed="true"] .n{opacity:.8}
+@media (min-width:1024px){
+  .bar-layer{display:flex; grid-area:layer; align-items:center}
+  .bar-row.has-layer{grid-template-columns:auto minmax(0,1fr) auto auto; grid-template-areas:"id ridge layer add"}
+  .layerchips{display:none}
+}
+
+/* ---------- Event pins (Advanced Markers; labels are textContent) ---------- */
+.epin{position:relative; display:flex; flex-direction:column; align-items:center; gap:3px; margin:0; padding:0; border:0; background:none; cursor:pointer; transform:translateY(8px)}
+.epin .disc{width:40px; height:40px; border-radius:50%; display:grid; place-items:center; background:var(--surface-2); border:2px solid var(--ev); box-shadow:0 0 0 2px var(--bg), 0 0 14px color-mix(in srgb, var(--ev) 60%, transparent)}
+.epin .disc svg{width:28px; height:28px; display:block}
+.epin .edate{font:700 11px/1 var(--body); letter-spacing:.08em; background:var(--ev); color:var(--on-ev); padding:3px 6px; border-radius:4px; white-space:nowrap; font-variant-numeric:tabular-nums; box-shadow:0 2px 6px rgba(0,0,0,.45)}
+.epin.sel .disc{transform:scale(1.15); border-color:var(--text)}
+.epin:focus-visible{outline:none}
+.epin:focus-visible .disc{outline:3px solid var(--focus); outline-offset:3px}
+
+/* ---------- List ---------- */
+.upcoming{display:flex; flex-direction:column; gap:12px; padding-bottom:18px; border-bottom:1px solid var(--line)}
+.erows,.grp ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px}
+.grp h3 .gn{opacity:.7; font-variant-numeric:tabular-nums; margin-left:4px}
+.erow{width:100%; display:grid; grid-template-columns:52px minmax(0,1fr) auto; gap:12px; align-items:center; text-align:left; padding:10px 12px; min-height:60px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); cursor:pointer; color:var(--text); font:inherit}
+.erow:hover{border-color:var(--muted)}
+.erow .info{min-width:0; display:flex; flex-direction:column; gap:3px}
+.erow .info strong{font-size:16px; line-height:1.25; overflow-wrap:anywhere}
+.erow .meta{font-size:13.5px; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center}
+.erow .chev{color:var(--muted); width:18px; height:18px}
+.erow .chev svg{width:100%; height:100%; display:block}
+.dchip{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:52px; height:56px; border-radius:10px; background:var(--surface-2); border:1px solid var(--line); line-height:1; font-variant-numeric:tabular-nums; flex:none}
+.dchip .mo{font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--ev)}
+.dchip .dd{font-size:21px; font-weight:700; color:var(--text)}
+.dchip .wd{font-size:10.5px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase}
+.t21{display:inline-block; font-size:11.5px; font-weight:700; letter-spacing:.04em; color:var(--ev); border:1px solid var(--ev); border-radius:4px; padding:0 5px; line-height:1.5}
+.t21.big{margin:8px 0 0; font-size:12.5px; padding:1px 7px}
+.eempty{border:1px dashed var(--line); border-radius:var(--radius); padding:22px 16px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--muted)}
+.eempty p{margin:0; font-size:16px; color:var(--text)}
+.eempty svg{width:46px; height:46px}
+
+/* ---------- Event sheet ---------- */
+.etitle{font-size:24px; font-weight:700; line-height:1.2; overflow-wrap:anywhere; text-wrap:balance}
+.ewhen{display:flex; gap:12px; align-items:center}
+.ewhen p{margin:0; display:flex; flex-direction:column}
+.ewhen b{font-size:16.5px}
+.ewhen span{color:var(--muted); font-size:14px}
+.eplace{margin:0; display:flex; flex-direction:column; gap:1px; padding:10px 14px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); font-size:14.5px; overflow-wrap:anywhere}
+.eplace b{font-size:15.5px}
+.eplace span{color:var(--muted)}
+.edesc{margin:0; white-space:pre-line; font-size:15.5px; line-height:1.55; overflow-wrap:anywhere}
+.eacts{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.eacts .btn{padding:0 10px; white-space:normal; text-align:center; line-height:1.15}
+
+/* ---------- Add chooser ---------- */
+.choose{gap:10px}
+.opt{display:grid; grid-template-columns:44px minmax(0,1fr) auto; align-items:center; gap:12px; width:100%; padding:14px; border-radius:var(--radius); border:1px solid var(--line); background:var(--surface-2); color:var(--text); text-align:left; cursor:pointer; font:inherit}
+.opt:hover:not(:disabled){border-color:var(--accent)}
+.opt:disabled{opacity:.62; cursor:not-allowed}
+.opt .og svg{width:42px; height:42px; display:block}
+.opt .ot{display:flex; flex-direction:column; min-width:0}
+.opt .ot b{font-size:17px}
+.opt .ot span{font-size:13.5px; color:var(--muted)}
+.opt .chev{width:20px; height:20px; color:var(--muted)}
+.opt .chev svg{width:100%; height:100%; display:block}
+.soon{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:1px 6px}
+
+/* ---------- Event form ---------- */
+.ef{display:flex; flex-direction:column; gap:14px}
+.fld{display:flex; flex-direction:column; gap:6px; min-width:0}
+.two{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px}
+.opt-t{font-weight:400; color:var(--muted)}
+.ef textarea.field{min-height:104px; resize:vertical; line-height:1.45; font:inherit}
+.ef input[type="date"].field,.ef input[type="time"].field{min-width:0; color-scheme:dark}
+.field[aria-invalid="true"],.epicker[aria-invalid="true"]{border-color:var(--danger)}
+.epicker[aria-invalid="true"]{border:1.5px solid var(--danger); border-radius:12px}
+.hint{margin:0; font-size:12.5px; color:var(--muted); display:flex; justify-content:space-between; gap:8px; font-variant-numeric:tabular-nums}
+.linkbtn.left{align-self:flex-start; padding:0; min-height:36px}
+.linkbtn.back{padding:0; min-height:36px; margin-bottom:2px}
+.ckbox{display:flex; gap:10px; align-items:flex-start; font-size:15px; font-weight:700; cursor:pointer}
+.ckbox input{width:22px; height:22px; margin:1px 0 0; accent-color:var(--accent); flex:none}
+.ckbox small{display:block; color:var(--muted); font-size:13px; font-weight:400}
+.hp{position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden}
+.edone{gap:12px}
+.edone .eg svg{width:64px; height:64px; display:block}
+.edone h3{margin:0; font-size:20px; line-height:1.3; text-wrap:balance}
+.edone .actions{justify-content:center}

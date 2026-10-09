@@ -1,11 +1,19 @@
-import type { PinView } from '@/lib/data/types';
+import type { PinView, PublicEvent } from '@/lib/data/types';
 import { THEMES } from '@/lib/theme/themes';
 import { firstSegment } from '@/lib/text/address';
 import { reverseGeocode } from './geocode';
 import { loadGoogle } from './loader';
-import { GLYPHS, PROBES, pickGlyph } from './glyphs';
+import { dateBadge, formatRange } from '@/lib/time/pacific';
+import { eventBounds } from '@/lib/data/events';
+
+import { EVENT_GLYPHS, GLYPHS, PROBES, pickGlyph } from './glyphs';
 import { buildMeter, updateMeter } from './meterEl';
 import type { MapAdapter } from './types';
+
+function eventLatLngBounds(r: Parameters<typeof eventBounds>[0]) {
+  const b = eventBounds(r);
+  return { north: b.maxLat, south: b.minLat, east: b.maxLng, west: b.minLng };
+}
 import { meterAriaText, powerKind } from '@/lib/votes/meter';
 
 export function createGoogleAdapter(): MapAdapter {
@@ -18,6 +26,9 @@ export function createGoogleAdapter(): MapAdapter {
     { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; meter: HTMLElement; pin: PinView }
   >();
   const listeners = new Set<(id: string) => void>();
+  const emarkers = new Map<string, { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; ev: PublicEvent }>();
+  const eventListeners = new Set<(id: string) => void>();
+  let pendingEvents: { events: PublicEvent[]; tz: string } | null = null;
   const clickListeners = new Set<(p: { lat: number; lng: number }) => void>();
   let lastPinClick = 0; // a pin tap must never also count as an empty-map tap
   let probe: google.maps.marker.AdvancedMarkerElement | null = null;
@@ -80,6 +91,45 @@ export function createGoogleAdapter(): MapAdapter {
     });
   };
 
+  // Event pins: a theme glyph in a ringed disc with a short date badge, drawn above the houses.
+  const renderEvents = (events: PublicEvent[], tz: string) => {
+    if (!map || !marker) return;
+    const ids = new Set(events.map((e) => e.id));
+    for (const [id, rec] of emarkers) {
+      if (!ids.has(id)) {
+        rec.m.map = null;
+        emarkers.delete(id);
+      }
+    }
+    for (const ev of events) {
+      if (emarkers.has(ev.id)) continue;
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'epin';
+      el.setAttribute('aria-label', `Event: ${ev.title}, ${formatRange(ev.startsAt, ev.endsAt, tz)}`);
+      const disc = document.createElement('span');
+      disc.className = 'disc';
+      disc.innerHTML = EVENT_GLYPHS[season]; // constant SVG string, never data
+      const badge = document.createElement('span');
+      badge.className = 'edate';
+      badge.textContent = dateBadge(ev.startsAt, tz);
+      el.append(disc, badge);
+      const m = new marker!.AdvancedMarkerElement({
+        map,
+        position: { lat: ev.lat, lng: ev.lng },
+        content: el,
+        title: ev.title,
+        zIndex: 500,
+      });
+      m.addListener('click', () => {
+        lastPinClick = Date.now();
+        eventListeners.forEach((cb) => cb(ev.id));
+      });
+      if (selected === ev.id) el.classList.add('sel');
+      emarkers.set(ev.id, { m, el, ev });
+    }
+  };
+
   return {
     async mount(el, o) {
       if (mounted) return;
@@ -101,10 +151,7 @@ export function createGoogleAdapter(): MapAdapter {
         zoomControl: true,
         gestureHandling: 'greedy',
         clickableIcons: false,
-        restriction: {
-          latLngBounds: { north: r.maxLat + 0.05, south: r.minLat - 0.05, east: r.maxLng + 0.05, west: r.minLng - 0.05 },
-          strictBounds: false,
-        },
+        restriction: { latLngBounds: eventLatLngBounds(r), strictBounds: false }, // same box as event submissions
       });
       // 'click' fires only for a tap that was not a drag or pinch; pins are filtered by lastPinClick.
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
@@ -114,6 +161,7 @@ export function createGoogleAdapter(): MapAdapter {
         clickListeners.forEach((cb) => cb(p));
       });
       if (pending) render(pending);
+      if (pendingEvents) renderEvents(pendingEvents.events, pendingEvents.tz);
     },
     onMapClick(cb) {
       clickListeners.add(cb);
@@ -153,13 +201,25 @@ export function createGoogleAdapter(): MapAdapter {
       pending = pins;
       render(pins);
     },
+    setEvents(events, tz) {
+      pendingEvents = { events, tz };
+      renderEvents(events, tz);
+    },
     focus(id) {
-      if (selected) markers.get(selected)?.el.classList.remove('sel');
+      if (selected) (markers.get(selected) ?? emarkers.get(selected))?.el.classList.remove('sel');
       selected = id;
       const rec = markers.get(id);
-      if (!rec || !map) return;
-      rec.el.classList.add('sel');
-      map.panTo({ lat: rec.pin.lat, lng: rec.pin.lng });
+      const erec = emarkers.get(id);
+      const at = rec ? { lat: rec.pin.lat, lng: rec.pin.lng } : erec ? { lat: erec.ev.lat, lng: erec.ev.lng } : null;
+      if (!at || !map) return;
+      (rec ?? erec)!.el.classList.add('sel');
+      map.panTo(at);
+    },
+    onEventSelect(cb) {
+      eventListeners.add(cb);
+      return () => {
+        eventListeners.delete(cb);
+      };
     },
     onPinSelect(cb) {
       listeners.add(cb);
@@ -171,6 +231,9 @@ export function createGoogleAdapter(): MapAdapter {
       dead = true;
       for (const rec of markers.values()) rec.m.map = null;
       markers.clear();
+      for (const rec of emarkers.values()) rec.m.map = null;
+      emarkers.clear();
+      eventListeners.clear();
       listeners.clear();
       clickListeners.clear();
       if (probe) probe.map = null;

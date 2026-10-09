@@ -100,3 +100,41 @@ with v(address, n) as (values
             returning 1)
 insert into public.house_vote_totals (house_id, region_id, votes)
 select h.id, h.region_id, h.n from h;
+-- Events v1: Truckee event submissions open locally (hosted stays closed: the column defaults to false).
+update public.site_settings s set events_open = true, updated_at = now()
+  from public.regions r where r.id = s.region_id and r.slug = 'truckee';
+
+-- A few FAKE events for halloween/2026 (made-up titles, venues and links; local times, days after the reset).
+-- Approved ones show on the map/list; the pending and rejected ones feed the admin Events tab.
+insert into public.events (region_id, season, year, title, description, venue, address, lat, lng, starts_at, ends_at,
+                           url, adults_only, status, source, source_url)
+select r.id, 'halloween', 2026, v.title, v.description, v.venue, v.address, v.lat, v.lng,
+       (date_trunc('day', now() at time zone r.timezone) + v.starts) at time zone r.timezone,
+       (date_trunc('day', now() at time zone r.timezone) + v.ends) at time zone r.timezone, v.url, v.adults_only,
+       v.status::public.event_status, v.source, v.source_url
+  from public.regions r
+ cross join (values
+   ('Fake Pumpkin Patch Stroll', E'A made-up stroll past carved pumpkins.\nBring a flashlight.', 'Fakepine Park',
+    'Fakepine Park, Truckee, CA', 39.3290, -120.1840, interval '1 day 16 hours', interval '1 day 19 hours',
+    'https://example.com/pumpkin-stroll', false, 'approved', 'seed', 'https://example.com/source/pumpkin'),
+   ('Fake Lantern Parade', 'A pretend parade with paper lanterns down a fake street.', null,
+    'Mockridge Plaza, Truckee, CA', 39.3360, -120.1920, interval '3 days 18 hours', null,
+    null, false, 'approved', 'community', null),
+   ('Fake Haunted Taproom Night', 'Costume contest at an imaginary taproom. Adults only.', 'Placeholder Taproom',
+    '48 Placeholder Way, Truckee, CA', 39.3400, -120.1700, interval '5 days 20 hours', interval '6 days',
+    'https://example.com/taproom', true, 'approved', 'community', null),
+   ('Fake Lakeside Ghost Walk', 'A made-up ghost walk by the lake, outside the house map area.', 'Sampleshore Beach',
+    'Sampleshore Beach, Kings Beach, CA', 39.2380, -120.0260, interval '6 days 18 hours', interval '6 days 20 hours',
+    null, false, 'approved', 'seed', 'https://example.com/source/ghost-walk'),
+   ('Fake Trunk or Treat', 'Pending example: a pretend trunk-or-treat in a fake parking lot.', 'Dummyhill Lot',
+    'Dummyhill Lot, Truckee, CA', 39.3150, -120.2200, interval '2 days 15 hours', interval '2 days 17 hours',
+    null, false, 'pending', 'community', null),
+   ('Fake Costume Swap', 'Pending example: swap made-up costumes with neighbors.', null,
+    '600 Examplecreek Rd, Truckee, CA', 39.3500, -120.1500, interval '4 days 12 hours', null,
+    'https://example.org/swap', false, 'pending', 'community', null),
+   ('Fake Spam Event', 'Rejected example: not a real public event at all.', null,
+    'Somewhere Fake, Truckee, CA', 39.3300, -120.1800, interval '2 days 12 hours', null,
+    null, false, 'rejected', 'community', null)
+ ) as v(title, description, venue, address, lat, lng, starts, ends, url, adults_only, status, source, source_url)
+ where r.slug = 'truckee';
+update public.events set reject_reason = 'local seed: rejected example', moderated_at = now() where status = 'rejected';
