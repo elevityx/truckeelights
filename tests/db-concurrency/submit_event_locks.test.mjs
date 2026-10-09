@@ -65,7 +65,7 @@ async function waitForWaiters(n) {
 
 const claims = (uid) => JSON.stringify({ sub: uid, role: 'authenticated', is_anonymous: true, aal: 'aal1' });
 const runId = () => crypto.randomBytes(3).toString('hex');
-let region; let startsAt; let origSeason; let origYear; let origOpen;
+let region; let startsAt;
 const users = [];
 const newUsers = async (n) => {
   const ids = Array.from({ length: n }, () => crypto.randomUUID());
@@ -76,7 +76,7 @@ const newUsers = async (n) => {
 const submit = (uid, title) => psql(`begin;
 set local role authenticated;
 select set_config('request.jwt.claims', ${lit(claims(uid))}, true) is not null;
-select 'RES|' || s.result || '|' || coalesce(s.event_id::text, '') from public.submit_event('truckee', ${lit(title)},
+select 'RES|' || s.result || '|' || coalesce(s.event_id::text, '') from public.submit_event('evlocktest', ${lit(title)},
   'A made-up concurrency test event.', null, 'Fakepine Park, Truckee, CA', null, ${region.lat}, ${region.lng},
   ${lit(startsAt)}, null, null, false) s;
 commit;`);
@@ -89,22 +89,31 @@ const lockKey = () => `hashtextextended('event:region:' || ${lit(region.id)}, 0)
 const setSettings = (sets) => q(`update public.site_settings set ${sets} where region_id = ${lit(region.id)};`);
 
 before(async () => {
-  const [id, lat, lng, season, year, open] = (await q(`select r.id, r.center_lat, r.center_lng, s.active_season, s.active_year, s.events_open
-    from public.regions r join public.site_settings s on s.region_id = r.id where r.slug = 'truckee';`)).split('|');
+  // Own throwaway region: these tests flip events_open and the season, which would break submit_event.test.mjs
+  // (node --test runs files in parallel) if they touched Truckee.
+  await q(`insert into public.regions (slug, name, min_lat, max_lat, min_lng, max_lng, center_lat, center_lng, default_zoom, timezone, is_active)
+    values ('evlocktest', 'Evlocktest', 39.2, 39.4, -120.3, -120.0, 39.33, -120.18, 12, 'America/Los_Angeles', true)
+    on conflict (slug) do update set is_active = true;
+    insert into public.site_settings (region_id, active_season, active_year, submissions_open, events_open)
+    select id, 'halloween', 2026, true, true from public.regions where slug = 'evlocktest'
+    on conflict (region_id) do nothing;`);
+  const [id, lat, lng] = (await q(`select id, center_lat, center_lng from public.regions where slug = 'evlocktest';`)).split('|');
   region = { id, lat: Number(lat), lng: Number(lng) };
-  origSeason = season; origYear = Number(year); origOpen = open === 't';
   startsAt = new Date(Math.ceil(Date.now() / 3_600_000) * 3_600_000 + 3 * 86_400_000).toISOString();
   await setSettings('events_open = true');
 });
 
 after(async () => {
-  await setSettings(`events_open = ${origOpen}, active_season = ${lit(origSeason)}, active_year = ${origYear}`);
   if (users.length > 0) {
     const list = users.map(lit).join(',');
     await q(`delete from public.events where created_by in (${list});
              delete from private.quota_events where uid in (${list});
              delete from auth.users where id in (${list});`);
   }
+  await q(`delete from public.events where region_id = ${lit(region.id)};
+           delete from private.quota_events where region_id = ${lit(region.id)};
+           delete from public.site_settings where region_id = ${lit(region.id)};
+           delete from public.regions where id = ${lit(region.id)};`);
 });
 
 test('locks 1: closing submissions while submits wait -> every waiter gets submissions_closed', async () => {
