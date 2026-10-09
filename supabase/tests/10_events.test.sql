@@ -3,7 +3,7 @@
 -- every moderation transition, admin update/create, retention, and the region-context capability object.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(150);
+select plan(151);
 
 -- ---------------------------------------------------------------- fixtures (as postgres). Do not rely on seed rows.
 delete from public.events;
@@ -104,6 +104,7 @@ select is(test_helpers.err(format('select test_helpers.submit(p_title => %L)', r
 select is(test_helpers.err($$select test_helpers.submit(p_title => 'Spooky <b>night</b>')$$), '22023:invalid_input:title', 'title with <>');
 select is(test_helpers.err($$select test_helpers.submit(p_title => 'Shit Show Parade')$$), '22023:invalid_input:title', 'title with a blocked term');
 select is(test_helpers.err($$select test_helpers.submit(p_title => '   ')$$), '22023:invalid_input:title', 'blank title');
+select is(test_helpers.err($$select test_helpers.submit(p_title => '!!! ###')$$), '22023:invalid_input:title', 'punctuation-only title (empty dedupe key)');
 select is(test_helpers.err($$select test_helpers.submit(p_description => 'too short')$$), '22023:invalid_input:description', 'description under 10 chars');
 select is(test_helpers.err(format('select test_helpers.submit(p_description => %L)', repeat('a', 601))), '22023:invalid_input:description', 'description over 600 chars');
 select is(test_helpers.err(format('select test_helpers.submit(p_description => %L)', 'line' || repeat(E'\nline', 7))), '22023:invalid_input:description', 'description with 7 newlines');

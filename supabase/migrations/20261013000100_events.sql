@@ -140,7 +140,9 @@ language plpgsql stable set search_path = '' as $$
 declare v_nl integer;
 begin
   title := btrim(regexp_replace(coalesce(p_title, ''), '\s+', ' ', 'g'));
-  if char_length(title) not between 3 and 80 or title ~ '[<>[:cntrl:]]' or private.has_blocked_term(title) then
+  -- needs a letter or digit, so the dedupe key (normalized_title) is never empty
+  if char_length(title) not between 3 and 80 or title ~ '[<>[:cntrl:]]' or private.has_blocked_term(title)
+     or private.normalize_event_title(title) !~ '[a-z0-9]' then
     raise exception 'invalid_input' using errcode = '22023', detail = 'title'; end if;
 
   description := replace(replace(replace(coalesce(p_description, ''), E'\r\n', E'\n'), E'\r', E'\n'), E'\t', ' ');
