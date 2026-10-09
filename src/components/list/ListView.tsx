@@ -4,6 +4,9 @@ import { useState, type ReactNode } from 'react';
 import type { PinView, Season } from '@/lib/data/types';
 import { pickGlyph } from '@/lib/maps/glyphs';
 import Glyph from './Glyph';
+import ListControls from './ListControls';
+import SortMenu from './SortMenu';
+import type { Sort } from './sortMenu.logic';
 import Meter from '@/components/house/Meter';
 import { VOTE_PRIVACY } from '@/components/house/votePanel.logic';
 import { THEMES } from '@/lib/theme/themes';
@@ -17,9 +20,10 @@ interface Props {
   onOpen(id: string): void;
   /** Shown above the houses (the Both view puts upcoming events here). */
   before?: ReactNode;
+  /** The inline Houses · Events · Both switch; below 1024px it opens the list in a control row next to the sort button. */
+  layerSwitch?: ReactNode;
 }
 
-type Sort = 'top' | 'az';
 const SORT_KEY = 'listSort';
 
 function savedSort(): Sort {
@@ -60,7 +64,7 @@ function VoteRow({ pin, season, rank, top3, onOpen }: { pin: PinView; season: Se
   );
 }
 
-export default function ListView({ season, year, pins, onOpen, before }: Props) {
+export default function ListView({ season, year, pins, onOpen, before, layerSwitch }: Props) {
   const t = THEMES[season];
   const [sort, setSortState] = useState<Sort>(savedSort);
   const setSort = (s: Sort) => {
@@ -71,10 +75,16 @@ export default function ListView({ season, year, pins, onOpen, before }: Props) 
       /* storage may be unavailable */
     }
   };
+  const listClass = layerSwitch ? 'list has-ctl' : 'list';
   if (pins.length === 0) {
     return (
-      <div className="list">
-        {before && <div className="list-in">{before}</div>}
+      <div className={listClass}>
+        {(layerSwitch || before) && (
+          <div className="list-in">
+            {layerSwitch && <ListControls layerSwitch={layerSwitch} />}
+            {before}
+          </div>
+        )}
         <div className="empty">
           <p className="disp">{t.empty}</p>
         </div>
@@ -84,22 +94,16 @@ export default function ListView({ season, year, pins, onOpen, before }: Props) 
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
   const { voted, waiting } = sort === 'top' ? rankHouses(pins) : { voted: [], waiting: [] };
   return (
-    <div className="list">
+    <div className={listClass}>
       <div className="list-in">
+        {layerSwitch && <ListControls layerSwitch={layerSwitch} sort={<SortMenu sort={sort} onChange={setSort} />} />}
         {before}
         <div className="list-head">
           <div>
             <h2 className="disp">{t.listTitle(pins.length)}</h2>
             <p>{sort === 'top' ? `Top voted · ${label} · resets each season` : `By street, A to Z · ${label}`}</p>
           </div>
-          <div className="seg lsort" role="group" aria-label="Sort houses">
-            <button type="button" aria-pressed={sort === 'top'} onClick={() => setSort('top')}>
-              Top voted
-            </button>
-            <button type="button" aria-pressed={sort === 'az'} onClick={() => setSort('az')}>
-              A–Z by street
-            </button>
-          </div>
+          <SortMenu sort={sort} onChange={setSort} className="sort-head" />
         </div>
         {sort === 'top' ? (
           <>

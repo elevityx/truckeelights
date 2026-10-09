@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react';
 import type { PublicEvent, Season } from '@/lib/data/types';
+import ListControls from '@/components/list/ListControls';
 import { formatRange, formatTimes, groupEvents } from '@/lib/time/pacific';
 import DateChip from './DateChip';
 import EventGlyph from './EventGlyph';
@@ -71,7 +73,7 @@ interface ListProps {
 const seasonLabel = (season: Season, year: number) => `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
 /** The Events view: Today · This week · Later, by start time. */
-export function EventsView({ events, tz, region, now, season, year, onOpen, onAdd }: ListProps) {
+export function EventsView({ events, tz, region, now, season, year, onOpen, onAdd, layerSwitch }: ListProps & { layerSwitch?: ReactNode }) {
   const g = groupEvents(events, now, tz);
   const groups: [string, PublicEvent[]][] = [
     ['Today', g.today],
@@ -80,8 +82,9 @@ export function EventsView({ events, tz, region, now, season, year, onOpen, onAd
   ];
   const total = g.today.length + g.week.length + g.later.length;
   return (
-    <div className="list">
+    <div className={layerSwitch ? 'list has-ctl' : 'list'}>
       <div className="list-in">
+        {layerSwitch && <ListControls layerSwitch={layerSwitch} />}
         <div className="list-head">
           <h2 className="disp">Upcoming events</h2>
           <p>{seasonLabel(season, year)} · Pacific time</p>
