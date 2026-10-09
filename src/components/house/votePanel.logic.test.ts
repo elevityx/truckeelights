@@ -15,9 +15,19 @@ describe('voteReducer (AC21)', () => {
   });
 
   it('rolls the tap back on an error', () => {
-    const s = run(initialVoteState(10), tap(), { type: 'send' }, fail('network'));
+    const s = run(initialVoteState(10), tap(), { type: 'send' }, fail('not_found'));
     expect([s.total, s.left, s.queue.length, s.inFlight]).toEqual([10, 5, 0, false]);
     expect(s.note).toMatchObject({ error: true });
+  });
+
+  it('holds an ambiguous failure back until the re-read: counted shows success, not counted shows the failure', () => {
+    const failed = run(initialVoteState(10), tap(), { type: 'send' }, fail('network'));
+    expect([failed.note, failed.pendingFail]).toEqual([null, 'x']);
+    const counted = voteReducer(failed, { type: 'sync', total: 11, left: 4, reconcile: true });
+    expect(counted).toMatchObject({ total: 11, left: 4, pendingFail: null, note: { error: false } });
+    const missed = voteReducer(failed, { type: 'sync', total: 10, left: 5, reconcile: true });
+    expect(missed).toMatchObject({ pendingFail: null, note: { error: true, text: 'x' } });
+    expect(voteReducer(failed, { type: 'giveUp' })).toMatchObject({ pendingFail: null, note: { error: true } });
   });
 
   it('a transient error rolls back only the in-flight head and keeps the rest queued', () => {

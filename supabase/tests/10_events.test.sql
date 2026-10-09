@@ -3,7 +3,7 @@
 -- every moderation transition, admin update/create, retention, and the region-context capability object.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(176);
+select plan(183);
 
 -- ---------------------------------------------------------------- fixtures (as postgres). Do not rely on seed rows.
 delete from public.events;
@@ -118,6 +118,13 @@ select ok(not private.has_blocked_term('Pour House Beer Night'), 'Pour House pas
 select ok(private.has_blocked_term('f.u.c.k'), 'f.u.c.k stays blocked');
 select ok(private.has_blocked_term('f-u-c-k'), 'f-u-c-k stays blocked');
 select ok(private.has_blocked_term(E'fu\u200bck'), 'zero-width space inside a blocked word stays blocked');
+select ok(private.has_blocked_term('f''u''c''k'), 'straight-apostrophe single-letter evasion f''u''c''k is blocked');
+select ok(private.has_blocked_term(E'f\u2019u\u2019c\u2019k'), 'curly-apostrophe single-letter evasion is blocked');
+select ok(private.has_blocked_term('F''u''c''k Fest'), 'f''u''c''k inside a title is blocked');
+select ok(private.has_blocked_term('f.u''c-k'), 'mixed single-letter separators are blocked');
+select ok(private.has_blocked_term(E'f\u200bu\u200bc\u200bk'), 'zero-width characters between single letters are blocked');
+select ok(not private.has_blocked_term('It''s Who''re We''re night'), 'it''s, who''re, we''re stay unjoined');
+select ok(not private.has_blocked_term(E'Who\u2019re coming? It\u2019s the O''Brien family''s Rock''n''roll show'), 'a normal sentence with apostrophes passes');
 set local role authenticated;
 select is(test_helpers.err($$select test_helpers.submit(p_title => '   ')$$), '22023:invalid_input:title', 'blank title');
 select is(test_helpers.err($$select test_helpers.submit(p_title => '!!! ###')$$), '22023:invalid_input:title', 'punctuation-only title (empty dedupe key)');

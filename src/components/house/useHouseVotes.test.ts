@@ -147,4 +147,64 @@ describe('stale async results', () => {
     await flush();
     expect(_store.get('h1', 10)).toMatchObject({ total: 10, left: 5, queue: [] });
   });
+
+  it('an ambiguous failure with a tap queued behind it still gets a status read after the queue drains', async () => {
+    _store.get('h1', 10);
+    let rejA!: (e: unknown) => void;
+    api.voteHouse
+      .mockReturnValueOnce(new Promise((_, r) => (rejA = r)))
+      .mockRejectedValueOnce(new DataError('not_found', 'photo')); // B: definitive, not network/unknown
+    api.getMyVoteStatus.mockResolvedValue({ totalVotes: 11, leftToday: 4 }); // A had committed
+    await _store.tap('h1', 'pA', 'panel');
+    await _store.tap('h1', 'pB', 'panel');
+    rejA(new TypeError('network down'));
+    await flush();
+    expect(api.getMyVoteStatus).toHaveBeenCalledTimes(1);
+    expect(_store.get('h1', 10)).toMatchObject({ total: 11, left: 4, queue: [] });
+  });
+
+  it('a recovered vote shows no failure note; a vote the re-read does not show keeps the failure', async () => {
+    _store.get('h1', 10);
+    api.voteHouse.mockRejectedValue(new TypeError('network down'));
+    api.getMyVoteStatus.mockResolvedValue({ totalVotes: 11, leftToday: 4 });
+    await _store.tap('h1', null, 'panel');
+    await flush();
+    const ok = _store.get('h1', 10);
+    expect(ok.pendingFail).toBeNull();
+    expect(ok.note?.error).toBe(false);
+
+    _store.reset();
+    api.hasSession.mockResolvedValue(true);
+    _store.get('h2', 10);
+    api.getMyVoteStatus.mockResolvedValue({ totalVotes: 10, leftToday: 5 }); // it did not count
+    await _store.tap('h2', null, 'panel');
+    await flush();
+    expect(_store.get('h2', 10)).toMatchObject({ total: 10, left: 5, note: { error: true } });
+  });
+
+  it('a failed re-read still surfaces the failure text', async () => {
+    _store.get('h1', 10);
+    api.voteHouse.mockRejectedValue(new TypeError('network down'));
+    api.getMyVoteStatus.mockRejectedValue(new TypeError('still down'));
+    await _store.tap('h1', null, 'panel');
+    await flush();
+    expect(_store.get('h1', 10).note?.error).toBe(true);
+  });
+
+  it("another house settling does not discard this house's status read", async () => {
+    _store.get('hA', 10);
+    _store.get('hB', 20);
+    let status!: (v: unknown) => void;
+    api.getMyVoteStatus.mockReturnValue(new Promise((r) => (status = r)));
+    const { _refresh } = await import('./useHouseVotes');
+    const read = _refresh('hA');
+    await flush();
+    api.voteHouse.mockResolvedValue({ totalVotes: 21, leftToday: 4 });
+    await _store.tap('hB', null, 'panel');
+    await flush();
+    status({ totalVotes: 12, leftToday: 5 });
+    await read;
+    await flush();
+    expect(_store.get('hA', 10)).toMatchObject({ total: 12, left: 5 });
+  });
 });

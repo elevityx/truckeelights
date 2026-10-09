@@ -51,7 +51,7 @@ describe('formatting', () => {
     expect(formatTimes('2026-10-03T01:00:00Z', '2026-11-02T06:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6–10 pm');
     expect(formatRange('2026-10-03T01:00:00Z', '2026-11-02T06:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6–10 pm');
     // starts at 12 am: just the last day
-    expect(formatTimes('2026-10-02T07:00:00Z', '2026-11-02T07:00:00Z', LA)).toBe('Through Nov 1');
+    expect(formatTimes('2026-10-02T07:00:00Z', '2026-11-02T08:00:00Z', LA)).toBe('Through Nov 1');
   });
   it('uses the nightly window when the end is two calendar days later', () => {
     expect(formatTimes('2026-10-31T03:00:00Z', '2026-11-02T09:00:00Z', LA)).toBe('Oct 30 – Nov 2 · nightly 8 pm–1 am');
@@ -59,6 +59,17 @@ describe('formatting', () => {
   it('reads an end at 12 am the next day as midnight', () => {
     expect(formatRange('2026-10-31T04:00:00Z', '2026-10-31T07:00:00Z', LA)).toBe('Fri, Oct 30 · 9 pm–midnight');
     expect(formatTimes('2026-10-31T04:00:00Z', '2026-10-31T07:00:00Z', LA)).toBe('9 pm–midnight');
+  });
+  it('a multi-day run ending at exactly 12 am counts the previous day as the last and reads midnight', () => {
+    // Fri Oct 2 6 pm PDT to Mon Nov 2 12 am PST (DST ends Nov 1): the last night is Nov 1
+    expect(formatTimes('2026-10-03T01:00:00Z', '2026-11-02T08:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6 pm–midnight');
+    expect(formatRange('2026-10-03T01:00:00Z', '2026-11-02T08:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6 pm–midnight');
+    // Sat Mar 13 2027 6 pm PST to Tue Mar 16 12 am PDT (DST starts Mar 14)
+    expect(formatTimes('2027-03-14T02:00:00Z', '2027-03-16T07:00:00Z', LA)).toBe('Mar 13 – Mar 15 · nightly 6 pm–midnight');
+    // midnight to midnight across the fall change, and a midnight start with a later end keeps the end clock
+    expect(formatTimes('2026-10-02T07:00:00Z', '2026-11-02T08:00:00Z', LA)).toBe('Through Nov 1');
+    expect(formatTimes('2026-10-02T07:00:00Z', '2026-11-02T06:00:00Z', LA)).toBe('Through Nov 1 · until 10 pm');
+    expect(formatTimes('2026-10-03T01:00:00Z', '2026-10-05T07:00:00Z', LA)).not.toMatch(/12 am|Oct 5/);
   });
   it('formats across the DST change in local time', () => {
     // Sat Oct 31 10 pm PDT to Sun Nov 1 1:30 am PST (the second 1:30)

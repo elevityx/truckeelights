@@ -5,7 +5,7 @@
 // voteReducer in votePanel.logic.ts.
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { toDataError, userMessage } from '@/lib/data/errors';
-import { initialVoteState, nextToSend, voteErrorMessage, voteReducer, canTap, type VoteAction, type VoteState } from './votePanel.logic';
+import { initialVoteState, isAmbiguous, nextToSend, voteErrorMessage, voteReducer, canTap, type VoteAction, type VoteState } from './votePanel.logic';
 import { votesApi, type VotesApi } from './votesApi';
 
 export type VoteSource = 'panel' | 'photo';
@@ -29,8 +29,11 @@ let exhausted = false; // uid_daily: session-wide, until reload
 let check: Check | null = null; // the one pending first vote waiting for the bot check
 let apiP: Promise<VotesApi> | null = null;
 const api = () => (apiP ??= votesApi());
-/** Bumps on every vote settle (ok or fail); a status read that started before the latest bump is stale. */
-let settleSeq = 0;
+/** Per house: bumps on every vote settle (ok or fail); a status read that started before the house's latest bump is stale. */
+const settleSeq = new Map<string, number>();
+const bumpSettle = (houseId: string) => settleSeq.set(houseId, (settleSeq.get(houseId) ?? 0) + 1);
+/** Houses with an ambiguous failure awaiting a status read once their queue drains. */
+const needsRecon = new Set<string>();
 
 /** Called with a house's new total whenever its vote store moves (optimistic tap, settle, rollback, server sync),
  *  even with no panel mounted, so the pins, list and map never keep a vote the server refused. */
@@ -79,19 +82,23 @@ async function pump(houseId: string) {
   const s = states.get(houseId);
   if (!s) return;
   const photoId = nextToSend(s);
-  if (photoId === undefined) return;
+  if (photoId === undefined) {
+    // Queue drained: an ambiguous failure earlier in it always gets its reconciliation read.
+    if (idleNow(houseId) && needsRecon.delete(houseId)) void refresh(houseId, true);
+    return;
+  }
   dispatch(houseId, { type: 'send' });
   try {
     const r = await (await api()).voteHouse(houseId, photoId);
-    settleSeq++;
+    bumpSettle(houseId);
     dispatch(houseId, { type: 'ok', total: r.totalVotes, left: r.leftToday });
   } catch (e) {
     const err = toDataError(e);
-    settleSeq++;
+    bumpSettle(houseId);
     if (err.code === 'not_signed_in') session = false; // the next tap shows the bot check again
     dispatch(houseId, { type: 'fail', code: err.code, detail: err.detail, message: voteErrorMessage(err.code, err.detail, userMessage(err)) });
     // The response may have been lost after the vote committed: re-read the server's count once nothing is queued.
-    if ((err.code === 'network' || err.code === 'unknown') && idleNow(houseId)) void refresh(houseId);
+    if (isAmbiguous(err.code)) needsRecon.add(houseId);
   }
   void pump(houseId);
 }
@@ -144,19 +151,32 @@ function cancelCheck() {
   emit();
 }
 
-/** Server truth for the house on open (only with a session; without one the device has all 5). */
-async function refresh(houseId: string) {
+/** Server truth for the house on open (only with a session; without one the device has all 5).
+ *  `reconcile`: the read follows an ambiguous failure; it is retried when stale or not idle, and gives up to the failure text. */
+async function refresh(houseId: string, reconcile = false) {
+  let applied = false;
   try {
     const a = await api();
     if (session !== true) session = await a.hasSession().catch(() => false);
     if (!session) return;
-    const startedAt = settleSeq;
+    const startedAt = settleSeq.get(houseId) ?? 0;
     const r = await a.getMyVoteStatus(houseId);
-    if (settleSeq !== startedAt) return; // a vote settled while this read was in flight: its answer is older than the store
-    dispatch(houseId, { type: 'sync', total: r.totalVotes, left: r.leftToday });
+    if ((settleSeq.get(houseId) ?? 0) !== startedAt || !idleNow(houseId)) {
+      // A vote for this house settled while the read was in flight: its answer is older than the store.
+      if (reconcile) {
+        needsRecon.add(houseId);
+        applied = true; // the retry owns the pending failure text now
+        void pump(houseId);
+      }
+      return;
+    }
+    dispatch(houseId, { type: 'sync', total: r.totalVotes, left: r.leftToday, reconcile });
+    applied = true;
   } catch (e) {
     if (toDataError(e).code === 'not_signed_in') session = false;
     // Otherwise keep the pin's count and 5 left; a vote will report the real state.
+  } finally {
+    if (reconcile && !applied && idleNow(houseId)) dispatch(houseId, { type: 'giveUp' });
   }
 }
 
@@ -205,7 +225,8 @@ export const _store = {
     check = null;
     session = null;
     exhausted = false;
-    settleSeq = 0;
+    settleSeq.clear();
+    needsRecon.clear();
     pinListener = null;
     apiP = null;
   },

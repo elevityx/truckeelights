@@ -9,6 +9,7 @@ import { toDataError } from '@/lib/data/errors';
 import type { RegionContext } from '@/lib/data/types';
 import { eventBounds, inEventBounds } from '@/lib/data/events';
 import { reverseGeocode } from '@/lib/maps/geocode';
+import { createGeneration } from '@/lib/maps/generation';
 import { createAddressPicker, createPinConfirm, EVENT_PLACE_TYPES } from '@/lib/maps/picker';
 import type { PickedPlace } from '@/lib/maps/types';
 import { useClock } from '@/lib/time/useClock';
@@ -60,6 +61,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
   const close = useCallback(() => closeRef.current(), []);
 
   // Places autocomplete limited to the event area (establishments, parks, plazas and street addresses).
+  const geoSeq = useRef(createGeneration()); // retires pending reverse-geocode work whenever the location is picked or rejected
   const pickerRef = useRef<HTMLDivElement>(null);
   const formShown = phase.kind === 'form';
   useEffect(() => {
@@ -70,6 +72,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
       pickerRef.current,
       area,
       (p: PickedPlace) => {
+        geoSeq.current.invalidate(); // a pending pin lookup must not overwrite this pick
         setPicking(false);
         setGeoNote('');
         setD((x) => ({ ...x, place: { placeId: p.placeId, lat: p.lat, lng: p.lng }, address: p.address }));
@@ -78,6 +81,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
       {
         allowTypes: EVENT_PLACE_TYPES,
         onReject: () => {
+          geoSeq.current.invalidate(); // a pending reverse geocode must not re-arm the location cleared below
           // The autocomplete already swapped its text for the rejected pick, so drop the earlier valid location too.
           setD((x) => clearRejectedPlace(x));
           setErrors((e) => ({ ...e, location: REJECTED_PLACE_ERROR }));
@@ -93,18 +97,17 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
   useEffect(() => {
     placeRef.current = d.place;
   }, [d.place]);
-  const geoSeq = useRef(0);
   useEffect(() => {
     if (!picking || !miniRef.current) return;
     const start = placeRef.current ?? { lat: region.centerLat, lng: region.centerLng };
     return createPinConfirm(miniRef.current, region, season, start, (lat, lng) => {
-      const n = ++geoSeq.current;
+      const n = geoSeq.current.begin();
       setD((x) => ({ ...x, place: { placeId: null, lat, lng } }));
       setErrors((e) => ({ ...e, location: undefined }));
       setGeoNote('Finding the address…');
       reverseGeocode({ lat, lng }, season)
         .then((rs) => {
-          if (n !== geoSeq.current) return;
+          if (!geoSeq.current.isCurrent(n)) return;
           const hit = rs.find((r) => inEventBounds(region, r.lat, r.lng));
           if (!hit) {
             setGeoNote('No address found there. Type the address below.');
@@ -114,7 +117,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
           setD((x) => ({ ...x, address: hit.address, place: { placeId: hit.placeId, lat, lng } }));
         })
         .catch(() => {
-          if (n === geoSeq.current) setGeoNote('Couldn’t look up that spot. Type the address below.');
+          if (geoSeq.current.isCurrent(n)) setGeoNote('Couldn’t look up that spot. Type the address below.');
         });
     }, eventBounds(region));
   }, [picking, region, season]);
@@ -326,7 +329,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
           <label className="lbl" htmlFor="ef-url">
             Website <span className="opt-t">(optional)</span>
           </label>
-          <input className="field" id="ef-url" type="url" inputMode="url" maxLength={300} placeholder="https://" value={d.url} onChange={(e) => set('url', e.target.value)} {...a11y('url')} />
+          <input className="field" id="ef-url" type="url" inputMode="url" placeholder="https://" value={d.url} onChange={(e) => set('url', e.target.value)} {...a11y('url')} />
           {errLine('url')}
         </div>
         <label className="ckbox">

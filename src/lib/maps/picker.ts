@@ -1,6 +1,7 @@
 import { mapsConfigured, publicEnv } from '@/config/public-env';
 import type { Region, Season } from '@/lib/data/types';
 import { THEMES } from '@/lib/theme/themes';
+import { createGeneration } from './generation';
 import { GLYPHS } from './glyphs';
 import { loadGoogle } from './loader';
 import type { PickedPlace } from './types';
@@ -78,6 +79,7 @@ export function createAddressPicker(
   let dead = false;
   let node: HTMLElement | null = null;
   let stubCleanup: (() => void) | null = null;
+  const selections = createGeneration(); // a slower earlier gmp-select must not land after a newer one
 
   void (async () => {
     try {
@@ -88,11 +90,12 @@ export function createAddressPicker(
         locationRestriction: { north: region.maxLat, south: region.minLat, east: region.maxLng, west: region.minLng },
       });
       pac.addEventListener('gmp-select', (async (e: Event) => {
+        const mine = selections.begin();
         try {
           const prediction = (e as unknown as { placePrediction: google.maps.places.PlacePrediction }).placePrediction;
           const place = prediction.toPlace();
           await place.fetchFields({ fields: ['id', 'formattedAddress', 'location', 'types'] });
-          if (dead || !place.id || !place.formattedAddress || !place.location) return;
+          if (dead || !selections.isCurrent(mine) || !place.id || !place.formattedAddress || !place.location) return;
           const picked: PickedPlace = {
             placeId: place.id,
             address: place.formattedAddress,
@@ -116,6 +119,7 @@ export function createAddressPicker(
 
   return () => {
     dead = true;
+    selections.invalidate();
     node?.remove();
     stubCleanup?.();
   };

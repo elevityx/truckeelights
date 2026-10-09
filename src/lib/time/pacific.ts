@@ -161,13 +161,15 @@ function clockSpan(s: WallClock, e: WallClock): string {
   return `${clock(s, !sameHalf)}–${clock(e, true)}`;
 }
 
-/** A run that spans more than one day: "Oct 2 – Nov 1 · nightly 6–10 pm", or "Through Nov 1" when it starts at 12 am. */
+/** A run that spans more than one day: "Oct 2 – Nov 1 · nightly 6–10 pm", or "Through Nov 1" when it starts at 12 am.
+ *  An end at exactly 12 am is the exclusive edge of the previous day: that day is the last one and the clock reads "midnight". */
 function multiDay(s: WallClock, e: WallClock): string {
-  if (s.hour === 0 && s.minute === 0) {
-    const last = e.hour === 0 && e.minute === 0 ? new Date(Date.UTC(e.year, e.month - 1, e.day - 1)) : new Date(Date.UTC(e.year, e.month - 1, e.day));
-    return `Through ${MONTHS[last.getUTCMonth()]} ${last.getUTCDate()}`;
-  }
-  return `${MONTHS[s.month - 1]} ${s.day} – ${MONTHS[e.month - 1]} ${e.day} · nightly ${clockSpan(s, e)}`;
+  const endsMidnight = e.hour === 0 && e.minute === 0;
+  const last = new Date(Date.UTC(e.year, e.month - 1, endsMidnight ? e.day - 1 : e.day));
+  const lastLabel = `${MONTHS[last.getUTCMonth()]} ${last.getUTCDate()}`;
+  if (s.hour === 0 && s.minute === 0) return endsMidnight ? `Through ${lastLabel}` : `Through ${lastLabel} · until ${clock(e, true)}`;
+  const span = endsMidnight ? `${clock(s, true)}–midnight` : clockSpan(s, e);
+  return `${MONTHS[s.month - 1]} ${s.day} – ${lastLabel} · nightly ${span}`;
 }
 
 /** Times only: "4–6 pm", "11 am–3 pm", "6:30 pm", "9 pm–midnight". An end on a later day reads "9 pm–Sat 1 am". */

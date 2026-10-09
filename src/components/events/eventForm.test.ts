@@ -132,3 +132,21 @@ describe('a rejected place type', () => {
     expect(after.address).toBe('');
   });
 });
+
+describe('website field length', () => {
+  const emojiUrl = (n: number) => 'https://example.org/' + '😀'.repeat(n); // 20 ASCII code points + n
+
+  it('counts code points: 280 emoji (300) pass, 281 (301) fail, even though 280 emoji are 580 UTF-16 units', () => {
+    expect(urlProblem(emojiUrl(141))).toBeNull();
+    expect(urlProblem(emojiUrl(280))).toBeNull();
+    expect(urlProblem(emojiUrl(281))).not.toBeNull();
+  });
+
+  it('the input has no native maxLength, which would count UTF-16 units and block a valid URL', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./AddEventSheet.tsx', import.meta.url), 'utf8');
+    const input = src.split('\n').find((l) => l.includes('id="ef-url"')) ?? '';
+    expect(input).not.toBe('');
+    expect(input).not.toMatch(/maxLength/);
+  });
+});

@@ -18,10 +18,13 @@ export interface VoteState {
   taps: number;
   /** Last settle, for the live region and toasts. `n` bumps each time. */
   note: { text: string; error: boolean; n: number } | null;
+  /** Failure text held back after an ambiguous (network/unknown) failure until the status re-read says whether the vote counted. */
+  pendingFail: string | null;
 }
 
 export type VoteAction =
-  | { type: 'sync'; total: number; left: number }
+  | { type: 'sync'; total: number; left: number; reconcile?: boolean }
+  | { type: 'giveUp' }
   | { type: 'seed'; total: number }
   | { type: 'tap'; photoId: string | null }
   | { type: 'send' }
@@ -30,7 +33,7 @@ export type VoteAction =
   | { type: 'exhaust' };
 
 export function initialVoteState(total: number): VoteState {
-  return { total: clean(total), left: DAILY_LIMIT, queue: [], inFlight: false, dailyExhausted: false, closed: false, reconciled: false, taps: 0, note: null };
+  return { total: clean(total), left: DAILY_LIMIT, queue: [], inFlight: false, dailyExhausted: false, closed: false, reconciled: false, taps: 0, note: null, pendingFail: null };
 }
 
 function clean(n: number): number {
@@ -57,6 +60,9 @@ export function nextToSend(s: VoteState): string | null | undefined {
 
 const TERMINAL_RATE = ['house_daily', 'uid_daily', 'network_daily', 'house_breaker', 'region_breaker'];
 
+/** The response may have been lost after the vote committed. */
+export const isAmbiguous = (code: DataErrorCode) => code === 'network' || code === 'unknown';
+
 /** Errors that would fail every queued tap the same way (so the rest of the queue is dropped, not sent). */
 export function isTerminal(code: DataErrorCode, detail?: string): boolean {
   if (code === 'votes_closed' || code === 'not_signed_in') return true;
@@ -65,9 +71,21 @@ export function isTerminal(code: DataErrorCode, detail?: string): boolean {
 
 export function voteReducer(s: VoteState, a: VoteAction): VoteState {
   switch (a.type) {
-    case 'sync':
+    case 'sync': {
       // Server truth on open; never overwrite optimistic taps that are still pending.
-      return idle(s) ? { ...s, total: clean(a.total), left: Math.min(DAILY_LIMIT, clean(a.left)), reconciled: true } : s;
+      if (!idle(s)) return s;
+      const left = Math.min(DAILY_LIMIT, clean(a.left));
+      const base = { ...s, total: clean(a.total), left, reconciled: true };
+      if (!a.reconcile || s.pendingFail === null) return base;
+      // Reconciling an ambiguous failure: fewer votes left than the rolled-back state means the vote did count.
+      const n = (s.note?.n ?? 0) + 1;
+      return left < s.left
+        ? { ...base, pendingFail: null, note: { text: `Voted. ${leftText(left)}.`, error: false, n } }
+        : { ...base, pendingFail: null, note: { text: s.pendingFail, error: true, n } };
+    }
+    case 'giveUp':
+      // The re-read could not say; fall back to the failure the visitor would have seen.
+      return s.pendingFail === null ? s : { ...s, pendingFail: null, note: { text: s.pendingFail, error: true, n: (s.note?.n ?? 0) + 1 } };
     case 'seed':
       // The pin's count, used until the server answers. Never clobbers a total this session already reconciled.
       return idle(s) && !s.reconciled ? { ...s, total: clean(a.total) } : s;
@@ -96,6 +114,7 @@ export function voteReducer(s: VoteState, a: VoteAction): VoteState {
       // Roll back the failed head. Terminal errors would fail every queued tap the same way, so those are dropped
       // and rolled back too; other errors (a dropped connection, a revoked photo) leave the rest of the queue to be sent.
       const terminal = isTerminal(a.code, a.detail);
+      const ambiguous = isAmbiguous(a.code);
       const undo = terminal ? s.queue.length : 1;
       let left = Math.min(DAILY_LIMIT, s.left + undo);
       let { dailyExhausted, closed } = s;
@@ -111,7 +130,10 @@ export function voteReducer(s: VoteState, a: VoteAction): VoteState {
         left,
         dailyExhausted,
         closed,
-        note: { text: a.message, error: true, n: (s.note?.n ?? 0) + 1 },
+        // An ambiguous failure may have committed: hold the message until the re-read settles it.
+        ...(ambiguous
+          ? { pendingFail: a.message }
+          : { pendingFail: null, note: { text: a.message, error: true, n: (s.note?.n ?? 0) + 1 } }),
       };
     }
     case 'exhaust':
