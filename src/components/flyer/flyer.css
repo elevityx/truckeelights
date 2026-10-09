@@ -76,18 +76,19 @@
 @media print{
   :root{color-scheme:light}
   html,body{height:auto!important; min-height:0!important; overflow:visible!important; display:block!important; background:#fff!important; margin:0!important; padding:0!important}
-  /* Browsers add their own margins, headers and footers (Safari ignores @page margins), so the box stays well inside a letter page with 1in of chrome. */
+  /* Fill whatever page area the browser leaves (print vh = the page box), and spread the content top to bottom.
+     The content itself is sized to about 8.3in, so it still fits when a browser adds about 1in of its own margins and headers. */
   .flyer-page{position:static; overflow:visible; padding:0; margin:0; background:#fff; height:auto}
   .flyer-tools,.fl-ack,body>*:not(.flyer-page){display:none!important}
-  .flyer{box-sizing:border-box; max-width:7in; width:6.8in; height:auto; max-height:8.8in; margin:0 auto; padding:.18in .2in; gap:.07in; border-radius:0; box-shadow:none; justify-content:flex-start; overflow:hidden; break-inside:avoid; page-break-inside:avoid; break-after:avoid; page-break-after:avoid}
-  .fl-kicker{font-size:11pt}
-  .fl-wm{font-size:54pt}
-  .fl-head{font-size:21pt}
-  .fl-motif{max-height:.8in; margin:0}
-  .fl-main{grid-template-columns:2.7in 1fr; gap:.25in; margin-top:0}
-  .fl-qr svg{width:2.7in}
-  .fl-qr figcaption{font-size:15pt}
-  .fl-steps{font-size:13pt; gap:.09in}
-  .fl-pitch{font-size:11pt; margin-top:0!important}
-  .fl-foot{font-size:10pt; padding-top:.07in}
+  .flyer{box-sizing:border-box; max-width:none; width:100%; height:100vh; max-height:100vh; margin:0; padding:.3in .3in; gap:.06in; border-radius:0; box-shadow:none; justify-content:space-between; overflow:hidden; break-inside:avoid; page-break-inside:avoid; break-after:avoid; page-break-after:avoid}
+  .fl-kicker{font-size:12pt}
+  .fl-wm{font-size:62pt}
+  .fl-head{font-size:24pt}
+  .fl-motif{max-height:.9in; margin:0}
+  .fl-main{grid-template-columns:3in 1fr; gap:.3in; margin-top:0}
+  .fl-qr svg{width:3in}
+  .fl-qr figcaption{font-size:16pt}
+  .fl-steps{font-size:15pt; gap:.12in}
+  .fl-pitch{font-size:12.5pt; margin-top:0!important}
+  .fl-foot{font-size:11.5pt; padding-top:.08in}
 }
