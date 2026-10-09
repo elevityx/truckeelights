@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  adminEventCounts,
   adminListHouses,
   adminReleaseHouse,
   adminSetHouseStatus,
@@ -14,11 +15,13 @@ import {
   type HouseStatus,
   type RegionContext,
 } from '@/lib/data';
+import EventsTab from './EventsTab';
 import PhotoQueue from './PhotoQueue';
 import SeasonPanel from './SeasonPanel';
 import VotesTab from './VotesTab';
 import StorageJobsBanner from './StorageJobsBanner';
 import { CLEANUP_WARNING, settleCleanup } from './photosState';
+import { badgeText } from './eventsState';
 import { SEASON_LABEL } from './seasonState';
 
 const REASONS = ['Duplicate', 'Not a display', 'Owner asked us to remove it', 'Inappropriate', 'Other'];
@@ -32,7 +35,10 @@ interface Props {
 }
 
 export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
-  const [tab, setTab] = useState<'season' | 'houses' | 'photos' | 'votes'>('season');
+  const [tab, setTab] = useState<'season' | 'houses' | 'photos' | 'votes' | 'events'>('season');
+  // A1: no events key in the context means a database without events: hide the tab and never call it.
+  const hasEvents = ctx.events !== undefined;
+  const [pendingEvents, setPendingEvents] = useState<number | null>(null);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
@@ -57,6 +63,17 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
       .catch(() => setVisibleCount(null));
   }, [ctx.region.id]);
   useEffect(refreshCount, [refreshCount, ctx.season, ctx.year]);
+
+  const refreshEventCount = useCallback(() => {
+    if (!hasEvents) return;
+    adminEventCounts(ctx.region.id)
+      .then((c) => setPendingEvents(c.pending))
+      .catch(() => setPendingEvents(null));
+  }, [ctx.region.id, hasEvents]);
+  useEffect(() => {
+    const t = setTimeout(refreshEventCount, 0);
+    return () => clearTimeout(t);
+  }, [refreshEventCount]);
 
   return (
     <div className="adm">
@@ -85,9 +102,9 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
           </div>
         )}
         <div className="tabs" role="tablist" aria-label="Back office sections">
-          {(['season', 'houses', 'photos', 'votes'] as const).map((k) => (
+          {(hasEvents ? (['season', 'houses', 'photos', 'votes', 'events'] as const) : (['season', 'houses', 'photos', 'votes'] as const)).map((k) => (
             <button key={k} type="button" role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : k === 'photos' ? 'Photos' : 'Votes'}
+              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : k === 'photos' ? 'Photos' : k === 'votes' ? 'Votes' : badgeText(pendingEvents)}
             </button>
           ))}
         </div>
@@ -95,6 +112,7 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
         {tab === 'houses' && <HousesPanel ctx={ctx} onForbidden={onForbidden} onChanged={refreshCount} onCleanup={cleanupAfterAction} />}
         {tab === 'photos' && <PhotoQueue ctx={ctx} onForbidden={onForbidden} onCleanup={cleanupAfterAction} />}
         {tab === 'votes' && <VotesTab ctx={ctx} onForbidden={onForbidden} />}
+        {tab === 'events' && hasEvents && <EventsTab ctx={ctx} onForbidden={onForbidden} onChanged={refreshEventCount} />}
       </div>
     </div>
   );
