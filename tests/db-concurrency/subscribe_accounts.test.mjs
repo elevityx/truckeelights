@@ -144,7 +144,7 @@ test('owner hide/unhide racing admin hide, unhide and release: no deadlock, cons
     ];
     const t = tally(await Promise.all(jobs.map((j) => j())));
     assert.equal(t.deadlock ?? 0, 0, `iteration ${it}: ${JSON.stringify(t)}`);
-    for (const k of Object.keys(t)) assert.ok(['ok', 'forbidden', 'must_be_hidden', 'not_found', 'claim_pending', 'rate_limited'].includes(k), `unexpected ${k}`);
+    for (const k of Object.keys(t)) assert.ok(['ok', 'forbidden', 'must_be_hidden', 'not_found', 'house_released', 'claim_pending', 'rate_limited'].includes(k), `unexpected ${k}`);
     const row = await q(`select status || '|' || coalesce(hidden_reason, '-') || '|' || (owner_id is null) from public.houses where id = ${lit(house)}`);
     const [status, reason, unowned] = row.split('|');
     if (status === 'released') assert.equal(unowned, 'true', 'a released house has no owner');
