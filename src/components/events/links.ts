@@ -1,5 +1,6 @@
+import { inEventBounds } from '@/lib/data/events';
 import { checkEventUrl } from '@/lib/data/eventUrl';
-import type { PublicEvent, Season } from '@/lib/data/types';
+import type { PublicEvent, Region, Season } from '@/lib/data/types';
 import { mapShareUrl, type ShareData } from '@/lib/share/urls';
 import { DEFAULT_LENGTH_MS } from '@/lib/time/pacific';
 
@@ -10,6 +11,13 @@ const CAL_LENGTH_MS = DEFAULT_LENGTH_MS;
 
 function gcalStamp(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); // 20261030T230000Z
+}
+
+export type RegionBox = Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>;
+
+/** Amendment 3: an event outside the local box (only admins can place one there, e.g. Reno) is "Worth the drive". */
+export function worthTheDrive(region: RegionBox, e: Pick<PublicEvent, 'lat' | 'lng'>): boolean {
+  return !inEventBounds(region, e.lat, e.lng);
 }
 
 export function placeLine(e: Pick<PublicEvent, 'venue' | 'address'>): string {

@@ -4,14 +4,15 @@ import { firstSegment } from '@/lib/text/address';
 import { reverseGeocode } from './geocode';
 import { loadGoogle } from './loader';
 import { dateBadge, formatRange } from '@/lib/time/pacific';
-import { eventBounds } from '@/lib/data/events';
+import { eventBoundsAdmin } from '@/lib/data/events';
 
 import { EVENT_GLYPHS, GLYPHS, PROBES, pickGlyph } from './glyphs';
 import { buildMeter, updateMeter } from './meterEl';
 import type { MapAdapter } from './types';
 
-function eventLatLngBounds(r: Parameters<typeof eventBounds>[0]) {
-  const b = eventBounds(r);
+/** Amendment 3: the camera may pan over the admin box (Reno, Carson City), so "Worth the drive" pins can be seen. */
+function eventLatLngBounds(r: Parameters<typeof eventBoundsAdmin>[0]) {
+  const b = eventBoundsAdmin(r);
   return { north: b.maxLat, south: b.minLat, east: b.maxLng, west: b.minLng };
 }
 import { meterAriaText, powerKind } from '@/lib/votes/meter';
@@ -151,7 +152,7 @@ export function createGoogleAdapter(): MapAdapter {
         zoomControl: true,
         gestureHandling: 'greedy',
         clickableIcons: false,
-        restriction: { latLngBounds: eventLatLngBounds(r), strictBounds: false }, // same box as event submissions
+        restriction: { latLngBounds: eventLatLngBounds(r), strictBounds: false }, // admin event box; camera starts on the region
       });
       // 'click' fires only for a tap that was not a drag or pinch; pins are filtered by lastPinClick.
       map.addListener('click', (e: google.maps.MapMouseEvent) => {

@@ -81,9 +81,17 @@ describe('buildEventInput', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(Object.keys(r.errors).sort()).toEqual(['description', 'title', 'venue']);
   });
-  it('flags out-of-bounds coordinates', () => {
-    const r = buildEventInput(good({ lat: '39.53', lng: '-119.8' }), region);
+  it('flags coordinates outside the admin box', () => {
+    const r = buildEventInput(good({ lat: '39.9', lng: '-119.8' }), region);
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.lat).toBe('That spot is outside the map area.');
+  });
+  it('validates against the admin box (Amendment 3): Reno and Carson City pass, Gardnerville and Fernley fail', () => {
+    const truckee = { minLat: 39.15, maxLat: 39.45, minLng: -120.42, maxLng: -119.98, timezone: TZ };
+    expect(buildEventInput(good({ lat: '39.545', lng: '-119.825' }), truckee).ok).toBe(true);
+    expect(buildEventInput(good({ lat: '39.164', lng: '-119.767' }), truckee).ok).toBe(true);
+    expect(buildEventInput(good({ lat: '38.94', lng: '-119.75' }), truckee).ok).toBe(false);
+    expect(buildEventInput(good({ lat: '39.61', lng: '-119.25' }), truckee).ok).toBe(false);
   });
   it('asks "Ends the next day?" and never infers', () => {
     const r = buildEventInput(good({ startTime: '20:00', endTime: '01:00' }), region);

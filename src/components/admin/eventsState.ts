@@ -1,7 +1,7 @@
 // Pure helpers for the admin Events tab (Spec_Events §3.6, Amendment 1 A2/A3/A4/A6/A10). No mini-map.
 // The database re-validates everything; these checks are for fast feedback only.
 import { eventUserMessage } from '@/lib/data/errors';
-import { inEventBounds } from '@/lib/data/events';
+import { inEventBoundsAdmin } from '@/lib/data/events';
 import { eventUrlHost } from '@/lib/data/eventUrl';
 import type { AdminEvent, DataError, EventInput, EventStatus, Region } from '@/lib/data/types';
 import { toUtc, utcToLocal } from '@/lib/time/pacific';
@@ -98,7 +98,7 @@ export function buildEventInput(v: EventFormValues, region: Pick<Region, 'minLat
   const lat = v.lat.trim() === '' ? NaN : Number(v.lat);
   const lng = v.lng.trim() === '' ? NaN : Number(v.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) errors.lat = 'Enter latitude and longitude.';
-  else if (!inEventBounds(region, lat, lng)) errors.lat = 'That spot is outside the map area.';
+  else if (!inEventBoundsAdmin(region, lat, lng)) errors.lat = 'That spot is outside the map area.'; // admin box (Amendment 3)
 
   let startsAt = '';
   const s = localToUtc(v.startDate, v.startTime, region.timezone);

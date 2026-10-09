@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicEvent } from '@/lib/data/types';
-import { directionsUrl, eventShareUrl, googleCalendarUrl, safeWebsite, townOf } from './links';
+import { directionsUrl, eventShareUrl, googleCalendarUrl, safeWebsite, townOf, worthTheDrive } from './links';
 
 const e: PublicEvent = {
   id: '11111111-2222-4333-8444-555555555555',
@@ -15,6 +15,19 @@ const e: PublicEvent = {
   url: 'https://example.org/park',
   adultsOnly: false,
 };
+
+describe('worthTheDrive (Amendment 3)', () => {
+  const truckee = { minLat: 39.15, maxLat: 39.45, minLng: -120.42, maxLng: -119.98 };
+  it.each([
+    ['Downtown Truckee', 39.3274, -120.1838, false],
+    ['Sand Harbor', 39.1979, -119.9306, false],
+    ['Crystal Bay', 39.2266, -120.0039, false],
+    ['Reno (Wilbur May Arboretum)', 39.545, -119.825, true],
+    ['Carson City', 39.164, -119.767, true],
+  ])('%s -> %s', (_n, lat, lng, far) => {
+    expect(worthTheDrive(truckee, { lat: lat as number, lng: lng as number })).toBe(far);
+  });
+});
 
 describe('googleCalendarUrl', () => {
   it('builds an encoded TEMPLATE link in UTC', () => {
