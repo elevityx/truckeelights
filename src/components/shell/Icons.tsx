@@ -56,3 +56,9 @@ export const ListIcon = () => (
     <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />
   </Svg>
 );
+export const InfoIcon = () => (
+  <Svg>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5.5M12 7.6v.4" />
+  </Svg>
+);

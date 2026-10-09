@@ -1,0 +1,34 @@
+/* About page. The body is a fixed 100dvh app shell, so the page scrolls inside its own layer (like the flyer). */
+.about-page{position:absolute; inset:0; overflow-y:auto; background:var(--bg); color:var(--text)}
+
+/* Season toggles: both versions are in the HTML; the boot script's data-theme picks one before first paint. */
+:root[data-theme="halloween"] .about-page .s-x{display:none}
+:root[data-theme="christmas"] .about-page .s-h{display:none}
+
+.about-top{position:relative; z-index:2; background:linear-gradient(180deg,var(--bar-a) 0%,var(--bar-a) 45%,var(--bar-b) 100%)}
+.about-top-in{max-width:760px; margin:0 auto; min-height:64px; padding:8px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px}
+.about-wm{color:var(--wm); text-shadow:var(--wm-shadow); text-decoration:none; font-size:clamp(22px, 7vw, 30px); line-height:1; white-space:nowrap}
+.about-wm .w2{color:var(--wm2)}
+.about-top .btn{flex:none; padding:0 16px}
+
+.about-main{max-width:760px; margin:0 auto; padding:40px 16px 48px; font-size:17px; line-height:1.6}
+.about-main h1{margin:6px 0 12px; font-size:clamp(28px, 7vw, 40px); line-height:1.15; font-weight:800; letter-spacing:-.01em; color:var(--text); text-wrap:balance}
+.about-main h2{margin:36px 0 10px; font-family:var(--font-display); font-weight:400; font-size:clamp(26px, 6vw, 34px); line-height:1.1; color:var(--accent)}
+.about-main h3{margin:0 0 4px; font-size:17.5px; line-height:1.3}
+.about-main p{margin:0 0 12px}
+.about-main strong{color:var(--accent)}
+.about-main a:not(.btn){color:var(--accent); font-weight:700; text-underline-offset:3px}
+.about-lede{font-size:clamp(18px, 4.6vw, 20px); color:var(--text)}
+
+.about-steps{list-style:none; margin:0 0 14px; padding:0; counter-reset:st; display:grid; gap:12px}
+.about-steps li{counter-increment:st; display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start; padding:12px 14px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius)}
+.about-steps li::before{content:counter(st); display:grid; place-items:center; width:32px; height:32px; border-radius:50%; background:var(--accent); color:var(--on-accent); font-weight:800; font-size:16px; line-height:1}
+@media (min-width:700px){ .about-steps{grid-template-columns:1fr 1fr} }
+
+.about-faq{display:grid; gap:18px}
+.about-faq > div{padding-left:14px; border-left:3px solid var(--deco)}
+.about-faq p{margin:0; color:var(--muted)}
+
+.about-ack{margin:40px 0 0!important; padding-top:14px; border-top:1px solid var(--line); text-align:center; font-size:14px; color:var(--muted)}
+.about-foot{display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin-top:8px; font-size:15px; color:var(--muted)}
+.about-foot a{min-height:44px; display:inline-flex; align-items:center}

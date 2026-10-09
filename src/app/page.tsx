@@ -7,6 +7,7 @@ import HouseSheet from '@/components/house/HouseSheet';
 import ListView from '@/components/list/ListView';
 import LoreBar from '@/components/lore/LoreBar';
 import MapView from '@/components/map/MapView';
+import HomeIntro from '@/components/home/HomeIntro';
 import Header from '@/components/shell/Header';
 import { ListIcon, MapIcon } from '@/components/shell/Icons';
 import Toast from '@/components/shell/Toast';
@@ -116,6 +117,7 @@ export default function HomePage() {
       <main className="err-page">
         <h1 className="wm disp">Truckee Lights</h1>
         <p role="status">{error === 'unconfigured' ? "Site isn't configured." : userMessage(error)}</p>
+        <HomeIntro />
       </main>
     );
   }
@@ -124,6 +126,7 @@ export default function HomePage() {
       <main className="err-page">
         <h1 className="wm disp">Truckee Lights</h1>
         <p role="status">Loading the map…</p>
+        <HomeIntro />
       </main>
     );
   }
