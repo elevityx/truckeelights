@@ -14,7 +14,8 @@ const HOST_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 /** Check an already-trimmed URL exactly as the server does (case-sensitive scheme, no trailing dot, no port). */
 export function checkEventUrl(v: string): EventUrlCheck {
-  if (v.length > EVENT_URL_MAX) return { ok: false, problem: 'length' };
+  // Count Unicode code points, as Postgres char_length does (string.length counts an emoji as two units).
+  if ([...v].length > EVENT_URL_MAX) return { ok: false, problem: 'length' };
   if (!v.startsWith('https://')) return { ok: false, problem: 'scheme' };
   if (BAD_CHARS.test(v)) return { ok: false, problem: 'chars' };
   const host = v.slice(8).toLowerCase().split('/', 1)[0].split('?', 1)[0].split('#', 1)[0];

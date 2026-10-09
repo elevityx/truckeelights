@@ -150,12 +150,35 @@ export function formatDay(iso: string, tz: string): string {
   return `${WEEKDAYS[w.weekday]}, ${MONTHS[w.month - 1]} ${w.day}`;
 }
 
+/** Whole local calendar days from the start's date to the end's date. */
+function dayGap(s: WallClock, e: WallClock): number {
+  return Math.round((Date.UTC(e.year, e.month - 1, e.day) - Date.UTC(s.year, s.month - 1, s.day)) / 86_400_000);
+}
+
+/** The clock span of one day: "6–10 pm", "11 am–3 pm". */
+function clockSpan(s: WallClock, e: WallClock): string {
+  const sameHalf = s.hour < 12 === e.hour < 12;
+  return `${clock(s, !sameHalf)}–${clock(e, true)}`;
+}
+
+/** A run that spans more than one day: "Oct 2 – Nov 1 · nightly 6–10 pm", or "Through Nov 1" when it starts at 12 am.
+ *  An end at exactly 12 am is the exclusive edge of the previous day: that day is the last one and the clock reads "midnight". */
+function multiDay(s: WallClock, e: WallClock): string {
+  const endsMidnight = e.hour === 0 && e.minute === 0;
+  const last = new Date(Date.UTC(e.year, e.month - 1, endsMidnight ? e.day - 1 : e.day));
+  const lastLabel = `${MONTHS[last.getUTCMonth()]} ${last.getUTCDate()}`;
+  if (s.hour === 0 && s.minute === 0) return endsMidnight ? `Through ${lastLabel}` : `Through ${lastLabel} · until ${clock(e, true)}`;
+  const span = endsMidnight ? `${clock(s, true)}–midnight` : clockSpan(s, e);
+  return `${MONTHS[s.month - 1]} ${s.day} – ${lastLabel} · nightly ${span}`;
+}
+
 /** Times only: "4–6 pm", "11 am–3 pm", "6:30 pm", "9 pm–midnight". An end on a later day reads "9 pm–Sat 1 am". */
 export function formatTimes(startsAt: string, endsAt: string | null, tz: string): string {
   const s = wallClock(Date.parse(startsAt), tz);
   if (!endsAt) return clock(s, true);
   const e = wallClock(Date.parse(endsAt), tz);
   if (endsAtMidnight(s, e)) return `${clock(s, true)}–midnight`;
+  if (dayGap(s, e) > 1) return multiDay(s, e);
   if (!sameDay(s, e)) return `${clock(s, true)}–${WEEKDAYS[e.weekday]} ${clock(e, true)}`;
   const sameHalf = s.hour < 12 === e.hour < 12;
   return `${clock(s, !sameHalf)}–${clock(e, true)}`;
@@ -167,6 +190,7 @@ export function formatRange(startsAt: string, endsAt: string | null, tz: string)
   if (endsAt) {
     const s = wallClock(Date.parse(startsAt), tz);
     const e = wallClock(Date.parse(endsAt), tz);
+    if (dayGap(s, e) > 1) return formatTimes(startsAt, endsAt, tz); // already carries the dates
     if (!sameDay(s, e) && !endsAtMidnight(s, e)) return `${day} · ${clock(s, true)} – ${formatDay(endsAt, tz)} · ${clock(e, true)}`;
   }
   return `${day} · ${formatTimes(startsAt, endsAt, tz)}`;

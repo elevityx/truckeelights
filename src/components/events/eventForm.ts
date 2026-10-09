@@ -20,6 +20,12 @@ export interface EventDraft {
   honeypot: string;
 }
 
+/** A pick whose place type is refused must not leave the earlier valid location armed: drop the place and its address. */
+export function clearRejectedPlace(d: EventDraft): EventDraft {
+  return { ...d, place: null, address: '' };
+}
+export const REJECTED_PLACE_ERROR = 'Pick a venue, park, plaza or street address, or drop a pin on the map.';
+
 export const emptyDraft: EventDraft = {
   title: '',
   startDate: '',
