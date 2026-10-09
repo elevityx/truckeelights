@@ -211,9 +211,9 @@ select throws_ok($$update public.events set url = 'https://bad host.com' where i
 select throws_ok($$update public.events set source_url = 'https://u@x.com' where id = 'e5000000-0000-4000-a000-0000000000f0'$$,
                  '23514', null, 'table CHECK backstop rejects a raw source_url with userinfo');
 select throws_ok($$insert into public.events (region_id, season, year, title, description, address, lat, lng, starts_at)
-                   values (current_setting('t.truckee')::uuid, 'halloween', 2026, 'Raw Reno', 'Raw fixture description.',
-                           'Somewhere, Reno', 39.5296, -119.8138, now() + interval '1 day')$$,
-                 '23514', 'out_of_bounds', 'the trigger rejects a raw insert outside the event bounds');
+                   values (current_setting('t.truckee')::uuid, 'halloween', 2026, 'Raw Fernley', 'Raw fixture description.',
+                           'Somewhere, Fernley', 39.61, -119.25, now() + interval '1 day')$$,
+                 '23514', 'out_of_bounds', 'the trigger rejects a raw insert outside the admin event box (Amendment 3; pgTAP 13)');
 
 -- ---------------------------------------------------------------- A2 derived columns (Pacific day, normalized title)
 select test_helpers.raw('e5000000-0000-4000-a000-0000000000f1', '  Trick-or-Treat  on  Main St.! ', 'pending',
@@ -558,9 +558,9 @@ select is(test_helpers.err(format($$select public.admin_create_event(%L, 'Admin 
                                  current_setting('t.truckee'), (now() + interval '1 day')::text)),
           '22023:invalid_input:source_url', 'admin_create_event validates source_url');
 select is(test_helpers.err(format($$select public.admin_create_event(%L, 'Admin Seeded Two', 'Our own wording for a seeded event.',
-                                   null, 'Somewhere, Reno', null, 39.5296, -119.8138, %L, null, null, false, null)$$,
+                                   null, 'Somewhere, Fernley', null, 39.61, -119.25, %L, null, null, false, null)$$,
                                  current_setting('t.truckee'), (now() + interval '1 day')::text)),
-          '22023:out_of_bounds:', 'admin_create_event checks bounds');
+          '22023:out_of_bounds:', 'admin_create_event checks bounds (admin box; Reno itself is allowed, pgTAP 13)');
 select is(test_helpers.err(format($$select public.admin_create_event(%L, 'admin seeded walk', 'Our own wording for a seeded event.',
                                    null, 'Downtown Park, Truckee', null, 39.328, -120.183, %L, null, null, false, null)$$,
                                  current_setting('t.truckee'), (now() - interval '3 days')::text)),

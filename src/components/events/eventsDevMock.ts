@@ -121,6 +121,18 @@ function halloween(today: string): PublicEvent[] {
       endsAt: at('2026-10-30', '23:00'),
       adultsOnly: true,
     }),
+    // Amendment 3: outside the local box, so it shows the "Worth the drive" chip (admin-only area).
+    ev(9, {
+      title: 'Dragon Lights Reno',
+      description: 'Giant glowing lantern sculptures along a night walk through the arboretum. Nightly 6-10 pm through Nov 1.',
+      venue: 'Wilbur D. May Arboretum',
+      address: '1595 N Sierra St, Reno, NV',
+      lat: 39.5446,
+      lng: -119.8214,
+      startsAt: at('2026-10-02', '18:00'),
+      endsAt: at('2026-11-01', '22:00'),
+      url: 'https://dragonlightsreno.org/',
+    }),
   ];
 }
 
@@ -153,6 +165,16 @@ function christmas(today: string): PublicEvent[] {
       lng: -120.144,
       startsAt: at(addDays(today, 12), '08:00'),
       endsAt: at(addDays(today, 12), '10:30'),
+    }),
+    ev(24, {
+      title: 'Lantern walk in Reno',
+      description: 'A made-up lantern walk outside the local area, to show the Worth the drive chip. Sample event for the mock.',
+      venue: 'Wilbur D. May Arboretum',
+      address: '1595 N Sierra St, Reno, NV',
+      lat: 39.5446,
+      lng: -119.8214,
+      startsAt: at(addDays(today, 5), '17:00'),
+      endsAt: at(addDays(today, 5), '21:00'),
     }),
   ];
 }

@@ -249,6 +249,7 @@ export default function HomePage() {
             <EventsView
               events={liveEvents}
               tz={ctx.region.timezone}
+              region={ctx.region}
               now={eventsNow}
               season={ctx.season}
               year={ctx.year}
@@ -266,6 +267,7 @@ export default function HomePage() {
                   <UpcomingEvents
                     events={liveEvents}
                     tz={ctx.region.timezone}
+                    region={ctx.region}
                     now={eventsNow}
                     season={ctx.season}
                     onOpen={selectEvent}
@@ -309,7 +311,7 @@ export default function HomePage() {
         />
       )}
       {sheet === 'event' && selectedEvent && (
-        <EventSheet event={selectedEvent} season={ctx.season} year={ctx.year} tz={ctx.region.timezone} onClose={closeSheet} onToast={showToast} />
+        <EventSheet event={selectedEvent} season={ctx.season} year={ctx.year} tz={ctx.region.timezone} region={ctx.region} onClose={closeSheet} onToast={showToast} />
       )}
       {sheet === 'chooser' && ctx.events && (
         <AddChooser

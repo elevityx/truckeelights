@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toAdminEvent } from './adminEvents';
-import { eventArgs, eventBounds, inEventBounds, parseSubmitEvent, toPublicEvent } from './events';
+import { eventArgs, eventBounds, eventBoundsAdmin, inEventBounds, inEventBoundsAdmin, parseSubmitEvent, toPublicEvent } from './events';
 import { eventsCapability } from './public';
 import type { EventInput } from './types';
 
@@ -28,6 +28,34 @@ describe('eventBounds (mirror of SQL private.event_bounds)', () => {
     ['Infinity', 39.33, Number.POSITIVE_INFINITY, false],
   ])('%s -> %s', (_name, lat, lng, inside) => {
     expect(inEventBounds(truckee, lat as number, lng as number)).toBe(inside);
+  });
+});
+
+describe('eventBoundsAdmin (mirror of SQL private.event_bounds_admin, Amendment 3)', () => {
+  it('is lat 39.09-39.60, lng -120.47 to -119.60 for Truckee', () => {
+    const b = eventBoundsAdmin(truckee);
+    expect(b.minLat).toBeCloseTo(39.09, 9);
+    expect(b.maxLat).toBeCloseTo(39.6, 9);
+    expect(b.minLng).toBeCloseTo(-120.47, 9);
+    expect(b.maxLng).toBeCloseTo(-119.6, 9);
+  });
+  it('contains the whole local box', () => {
+    const a = eventBoundsAdmin(truckee);
+    const l = eventBounds(truckee);
+    expect(a.minLat <= l.minLat && a.maxLat >= l.maxLat && a.minLng <= l.minLng && a.maxLng >= l.maxLng).toBe(true);
+  });
+  it.each([
+    ['Truckee', 39.328, -120.183, true, true],
+    ['Sand Harbor', 39.1979, -119.9306, true, true],
+    ['Reno (Wilbur May Arboretum)', 39.545, -119.825, true, false],
+    ['Carson City', 39.164, -119.767, true, false],
+    ['Gardnerville', 38.94, -119.75, false, false],
+    ['Fernley', 39.61, -119.25, false, false],
+    ['NaN', Number.NaN, -119.8, false, false],
+    ['Infinity', 39.5, Number.POSITIVE_INFINITY, false, false],
+  ])('%s -> admin %s, local %s', (_name, lat, lng, admin, local) => {
+    expect(inEventBoundsAdmin(truckee, lat as number, lng as number)).toBe(admin);
+    expect(inEventBounds(truckee, lat as number, lng as number)).toBe(local);
   });
 });
 

@@ -8,19 +8,22 @@ import { shareOrCopy, shareToast } from '@/lib/share/urls';
 import { formatRange } from '@/lib/time/pacific';
 import DateChip from './DateChip';
 import { CalIcon, WebIcon } from './EventIcons';
-import { directionsUrl, eventShareData, googleCalendarUrl, safeWebsite } from './links';
+import { directionsUrl, eventShareData, googleCalendarUrl, safeWebsite, worthTheDrive, type RegionBox } from './links';
 
 interface Props {
   event: PublicEvent;
   season: Season;
   year: number;
   tz: string;
+  /** The region's bbox: an event outside its local event box gets the "Worth the drive" chip. */
+  region: RegionBox;
   onClose(): void;
   onToast(msg: string): void;
 }
 
 /** Event details. Every data string renders as React text; nothing is injected as HTML. */
-export default function EventSheet({ event: e, season, year, tz, onClose, onToast }: Props) {
+export default function EventSheet({ event: e, season, year, tz, region, onClose, onToast }: Props) {
+  const far = worthTheDrive(region, e);
   const website = safeWebsite(e.url);
   const share = async () => {
     const msg = shareToast(await shareOrCopy(eventShareData(season, publicEnv.siteUrl, e), navigator));
@@ -35,7 +38,12 @@ export default function EventSheet({ event: e, season, year, tz, onClose, onToas
               Event · {season === 'halloween' ? 'Halloween' : 'Christmas'} {year}
             </p>
             <h2 className="etitle">{e.title}</h2>
-            {e.adultsOnly && <p className="t21 big">21+ · Adults only</p>}
+            {(e.adultsOnly || far) && (
+              <p className="etags">
+                {e.adultsOnly && <span className="t21 big">21+ · Adults only</span>}
+                {far && <span className="tdrive big">Worth the drive</span>}
+              </p>
+            )}
           </div>
           <button type="button" className="iconbtn x" aria-label="Close event details" onClick={onClose}>
             <XIcon />

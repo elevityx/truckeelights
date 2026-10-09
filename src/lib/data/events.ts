@@ -70,10 +70,26 @@ export function eventBounds(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'ma
   return { minLat: r.minLat - 0.05, maxLat: r.maxLat + 0.05, minLng: r.minLng - 0.05, maxLng: r.maxLng + 0.1 };
 }
 
+type Box = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 /** Inclusive, like SQL BETWEEN; NaN and Infinity fail. */
+const inBox = (b: Box, lat: number, lng: number) => lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+
+/** Inside the local box (eventBounds): where visitors may submit. Outside it, an event is "Worth the drive". */
 export function inEventBounds(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>, lat: number, lng: number): boolean {
-  const b = eventBounds(r);
-  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+  return inBox(eventBounds(r), lat, lng);
+}
+
+/**
+ * Amendment 3: the admin box = the local box joined with the Reno-area box (region bbox: south - 0.06, north + 0.15,
+ * west - 0.05, east + 0.38 deg; for Truckee lat 39.09-39.60, lng -120.47 to -119.60). Mirrors SQL
+ * private.event_bounds_admin (pgTAP 13 pins the numbers). Admin create/update and the map camera restriction use it.
+ */
+export function eventBoundsAdmin(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>) {
+  return { minLat: r.minLat - 0.06, maxLat: r.maxLat + 0.15, minLng: r.minLng - 0.05, maxLng: r.maxLng + 0.38 };
+}
+
+export function inEventBoundsAdmin(r: Pick<Region, 'minLat' | 'maxLat' | 'minLng' | 'maxLng'>, lat: number, lng: number): boolean {
+  return inBox(eventBoundsAdmin(r), lat, lng);
 }
 
 /** Approved, active-season, not-ended events of the region (RLS applies the filters), ordered by start. */
