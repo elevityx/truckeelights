@@ -17,7 +17,7 @@ describe('flyerSeasonFromQuery', () => {
 describe('flyer copy', () => {
   it('talks about houses and events in both seasons', () => {
     expect(FLYER_COPY.halloween.pitch).toMatch(/spooky-season events/);
-    expect(FLYER_COPY.halloween.pitch).toMatch(/trunk-or-treats/);
+    expect(FLYER_COPY.halloween.pitch).toMatch(/trick-or-treating/);
     expect(FLYER_COPY.christmas.pitch).toMatch(/holiday events/);
     expect(FLYER_COPY.christmas.pitch).toMatch(/tree lightings/);
     expect(FLYER_COPY.halloween.footer).toMatch(/^Not decorating\? Scan to find the spookiest streets, vote for your favorite house/);

@@ -72,18 +72,22 @@
 
 .fl-ack{max-width:816px; margin:14px auto 0; text-align:center; font-size:12px; line-height:1.4; color:var(--muted)}
 
-@page{size:letter portrait; margin:.5in}
+@page{size:letter portrait; margin:.4in}
 @media print{
   :root{color-scheme:light}
-  html,body{height:auto!important; overflow:visible!important; display:block!important; background:#fff!important}
-  .flyer-page{position:static; overflow:visible; padding:0; background:#fff}
-  .flyer-tools,.fl-ack{display:none}
-  .flyer{max-width:none; width:7.5in; height:9.9in; padding:.2in .1in; border-radius:0; box-shadow:none; justify-content:space-between; break-inside:avoid; page-break-inside:avoid}
-  .fl-wm{font-size:68pt}
-  .fl-head{font-size:28pt}
-  .fl-main{grid-template-columns:3.5in 1fr}
-  .fl-qr svg{width:3.4in}
-  .fl-steps{font-size:16pt}
-  .fl-pitch{font-size:14pt}
-  .fl-foot{font-size:13pt}
+  html,body{height:auto!important; min-height:0!important; overflow:visible!important; display:block!important; background:#fff!important; margin:0!important; padding:0!important}
+  /* Browsers add their own margins, headers and footers (Safari ignores @page margins), so the box stays well inside a letter page with 1in of chrome. */
+  .flyer-page{position:static; overflow:visible; padding:0; margin:0; background:#fff; height:auto}
+  .flyer-tools,.fl-ack,body>*:not(.flyer-page){display:none!important}
+  .flyer{box-sizing:border-box; max-width:7in; width:6.8in; height:auto; max-height:8.8in; margin:0 auto; padding:.18in .2in; gap:.07in; border-radius:0; box-shadow:none; justify-content:flex-start; overflow:hidden; break-inside:avoid; page-break-inside:avoid; break-after:avoid; page-break-after:avoid}
+  .fl-kicker{font-size:11pt}
+  .fl-wm{font-size:54pt}
+  .fl-head{font-size:21pt}
+  .fl-motif{max-height:.8in; margin:0}
+  .fl-main{grid-template-columns:2.7in 1fr; gap:.25in; margin-top:0}
+  .fl-qr svg{width:2.7in}
+  .fl-qr figcaption{font-size:15pt}
+  .fl-steps{font-size:13pt; gap:.09in}
+  .fl-pitch{font-size:11pt; margin-top:0!important}
+  .fl-foot{font-size:10pt; padding-top:.07in}
 }

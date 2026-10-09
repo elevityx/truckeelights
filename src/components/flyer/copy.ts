@@ -26,7 +26,7 @@ export const FLYER_COPY: Record<Season, FlyerCopy> = {
     wordmark: 'Truckee Frights',
     headline: 'Add your spooky house or event to the map!',
     pitch:
-      'A free community map of Truckee’s decorated houses and spooky-season events — haunted walks, trunk-or-treats, fall fests and more.',
+      'A free community map of Truckee’s decorated houses and spooky-season events — haunted walks, trick-or-treating, fall fests and more.',
     steps: STEPS,
     footer: 'Not decorating? Scan to find the spookiest streets, vote for your favorite house, and see what’s happening this season.',
   },
