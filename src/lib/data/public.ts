@@ -23,6 +23,7 @@ interface RawContext {
   submissions_open: boolean;
   wordmark: string;
   photos_open?: boolean;
+  votes_open?: boolean;
 }
 
 export async function getRegionContext(slug?: string): Promise<RegionContext> {
@@ -52,6 +53,7 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
       submissionsOpen: c.submissions_open,
       wordmark: c.wordmark,
       photosOpen: c.photos_open === true,
+      votesOpen: c.votes_open === true,
     };
   } catch (e) {
     throw e instanceof DataError ? e : toDataError(e);
@@ -73,6 +75,7 @@ export async function listMapHouses(regionId: string): Promise<PinView[]> {
       lat: Number(h.lat),
       lng: Number(h.lng),
       photoCount: 0,
+      votes: 0,
       badges: [],
     }));
   } catch (e) {

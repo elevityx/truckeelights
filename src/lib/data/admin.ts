@@ -1,6 +1,6 @@
 import { getSupabase } from '@/lib/supabase/client';
 import { toDataError } from './errors';
-import type { AdminHouse, HouseStatus, Season } from './types';
+import type { AdminHouse, AdminVoteRow, HouseStatus, Season } from './types';
 
 // Owner: WP-D. Every function wraps its errors with toDataError. The database enforces
 // admin + aal2 on every admin RPC; nothing here is a security boundary.
@@ -170,4 +170,28 @@ export async function adminReleaseHouse(houseId: string): Promise<void> {
   } catch (e) {
     throw toDataError(e);
   }
+}
+
+// Owner: V3. Votes admin stubs until the RPCs are wired.
+
+export async function adminVoteStats(_regionId: string): Promise<AdminVoteRow[]> {
+  void _regionId;
+  throw new Error('not implemented');
+}
+
+export async function adminVoidVotes(_houseId: string, _since: string | null, _uid: string | null): Promise<number> {
+  void _houseId;
+  void _since;
+  void _uid;
+  throw new Error('not implemented');
+}
+
+export async function adminSetVotesOpen(_regionId: string, _open: boolean): Promise<void> {
+  void _regionId;
+  void _open;
+  throw new Error('not implemented');
+}
+
+export async function adminNetworkCapStatus(): Promise<boolean> {
+  throw new Error('not implemented');
 }

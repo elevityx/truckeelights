@@ -26,7 +26,7 @@ const c = (o: Partial<GeocodeCandidate>): GeocodeCandidate => ({
   types: ['street_address'],
   ...o,
 });
-const pin = (o: Partial<PinView>): PinView => ({ id: 'h1', address: '1 A St, Truckee', lat: 39.3, lng: -120.2, photoCount: 0, badges: [], ...o });
+const pin = (o: Partial<PinView>): PinView => ({ id: 'h1', address: '1 A St, Truckee', lat: 39.3, lng: -120.2, photoCount: 0, votes: 0, badges: [], ...o });
 
 describe('pickStreetResult', () => {
   it('takes the first street-level result and keeps the tapped point', () => {

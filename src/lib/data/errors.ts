@@ -50,6 +50,8 @@ export function userMessage(e: DataError, regionName = 'this'): string {
     case 'not_pending':
     case 'not_approved':
       return 'Someone already handled this photo. Refresh the list.';
+    case 'votes_closed':
+      return 'Voting opens soon.';
     case 'captcha_failed':
       return "The bot check didn't go through. Try it again.";
     case 'network':
