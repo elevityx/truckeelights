@@ -55,7 +55,8 @@ function PhotoHeart({ vote: v, photoId }: { vote: LightboxVote; photoId: string 
     () => () => {
       if (checkRef.current) cancelCheck();
     },
-    [cancelCheck],
+    // Also runs when the house changes, so a pending bot check never strands the next house's button.
+    [cancelCheck, v.houseId],
   );
   const open = v.open && !closed;
   const disabled = !open || dailyExhausted || left === 0 || !!check;

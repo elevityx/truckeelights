@@ -27,6 +27,13 @@ let check: Check | null = null; // the one pending first vote waiting for the bo
 let apiP: Promise<VotesApi> | null = null;
 const api = () => (apiP ??= votesApi());
 
+/** Called with a house's new total whenever its vote store moves (optimistic tap, settle, rollback, server sync),
+ *  even with no panel mounted, so the pins, list and map never keep a vote the server refused. */
+let pinListener: ((houseId: string, total: number) => void) | null = null;
+export function setPinTotalListener(fn: ((houseId: string, total: number) => void) | null) {
+  pinListener = fn;
+}
+
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => {
   listeners.add(l);
@@ -50,6 +57,7 @@ function dispatch(houseId: string, a: VoteAction) {
   const next = voteReducer(cur, a);
   if (next === cur) return;
   states.set(houseId, next);
+  if (a.type !== 'seed' && next.total !== cur.total) pinListener?.(houseId, next.total);
   if (next.dailyExhausted && !exhausted) {
     exhausted = true;
     for (const [id, s] of states) if (!s.dailyExhausted) states.set(id, voteReducer(s, { type: 'exhaust' }));
@@ -104,11 +112,13 @@ async function onToken(token: string) {
   try {
     await (await api()).ensureAnonymousSession(token);
     session = true;
+    if (check?.busy !== true || check.houseId !== c.houseId) return; // cancelled meanwhile (sheet closed or house switched): drop the tap
     check = null;
     emit();
     accept(c.houseId, c.photoId);
     void refresh(c.houseId);
   } catch (e) {
+    if (!check || check.houseId !== c.houseId) return; // cancelled meanwhile
     check = { ...c, busy: false, error: userMessage(toDataError(e)), resetKey: c.resetKey + 1 };
     emit();
   }
@@ -160,3 +170,26 @@ export function useHouseVotes(houseId: string, seedTotal: number) {
     cancelCheck,
   };
 }
+
+/** Test seams: the module store without React. */
+export const _store = {
+  tap,
+  onToken,
+  cancelCheck,
+  get: get,
+  getCheck: () => check,
+  setSession: (v: boolean | null) => {
+    session = v;
+  },
+  reset() {
+    states.clear();
+    check = null;
+    session = null;
+    exhausted = false;
+    pinListener = null;
+    apiP = null;
+  },
+  settle: async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  },
+};

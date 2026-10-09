@@ -30,7 +30,6 @@ interface Props {
   pin: PinView;
   season: Season;
   votesOpen: boolean;
-  onVoted(houseId: string, total: number): void;
   onToast(msg: string): void;
   photosOpen?: boolean;
   /** Opens the photo picker (only while photo uploads are open). */
@@ -69,7 +68,7 @@ const BUTTON: Record<PowerKind, string> = { pumpkin: 'Give it Pumpkin Power', gh
 const STAKE = ['1 ft', '3 ft', '6 ft', '9 ft']; // depth at each notch (0, 25, 50, 100 votes), as painted
 const CELLS = ['¼', '½', '¾', 'FULL'];
 
-export default function VotePanel({ pin, season, votesOpen, onVoted, onToast, photosOpen = false, onAddPhotos }: Props) {
+export default function VotePanel({ pin, season, votesOpen, onToast, photosOpen = false, onAddPhotos }: Props) {
   const kind = powerKind(season, pickGlyph(pin.id, season));
   const { state, check, vote, refresh, onToken, cancelCheck } = useHouseVotes(pin.id, pin.votes);
   const { total, left, dailyExhausted, closed, note, taps, queue } = state;
@@ -77,15 +76,6 @@ export default function VotePanel({ pin, season, votesOpen, onVoted, onToast, ph
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  // Keep the pin (and its map meter) in step with this house's total.
-  const onVotedRef = useRef(onVoted);
-  useEffect(() => {
-    onVotedRef.current = onVoted;
-  });
-  useEffect(() => {
-    if (total !== pin.votes) onVotedRef.current(pin.id, total);
-  }, [total, pin.id, pin.votes]);
 
   // Errors also go to a toast; the status line under the button carries them for screen readers.
   const lastNote = useRef(note?.n ?? 0);
@@ -105,7 +95,8 @@ export default function VotePanel({ pin, season, votesOpen, onVoted, onToast, ph
     () => () => {
       if (checkRef.current) cancelCheck();
     },
-    [cancelCheck],
+    // Also runs when the house changes, so a pending bot check never strands the next house's button.
+    [cancelCheck, pin.id],
   );
 
   const [firstTaps] = useState(taps);

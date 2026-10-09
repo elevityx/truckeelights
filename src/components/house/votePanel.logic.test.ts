@@ -3,7 +3,7 @@ import { canTap, initialVoteState, nextToSend, voteErrorMessage, voteReducer, ty
 
 const run = (s: VoteState, ...as: VoteAction[]) => as.reduce(voteReducer, s);
 const tap = (photoId: string | null = null): VoteAction => ({ type: 'tap', photoId });
-const fail = (code: 'rate_limited' | 'network' | 'votes_closed', detail?: string): VoteAction => ({ type: 'fail', code, detail, message: 'x' });
+const fail = (code: 'rate_limited' | 'network' | 'votes_closed' | 'unknown' | 'not_found', detail?: string): VoteAction => ({ type: 'fail', code, detail, message: 'x' });
 
 describe('voteReducer (AC21)', () => {
   it('applies a tap optimistically and keeps the server answer on success', () => {
@@ -20,9 +20,42 @@ describe('voteReducer (AC21)', () => {
     expect(s.note).toMatchObject({ error: true });
   });
 
-  it('rolls back the queued taps behind a failure too', () => {
-    const s = run(initialVoteState(10), tap(), tap(), tap(), { type: 'send' }, fail('network'));
-    expect([s.total, s.left, s.queue.length]).toEqual([10, 5, 0]);
+  it('a transient error rolls back only the in-flight head and keeps the rest queued', () => {
+    for (const code of ['network', 'unknown', 'not_found'] as const) {
+      const s = run(initialVoteState(10), tap('p1'), tap('p2'), tap('p3'), { type: 'send' }, fail(code));
+      expect([s.total, s.left, s.queue, s.inFlight]).toEqual([12, 3, ['p2', 'p3'], false]);
+      expect(nextToSend(s)).toBe('p2');
+      expect(s.closed).toBe(false);
+    }
+  });
+
+  it('terminal errors drop and roll back the whole queue', () => {
+    const cases: [Parameters<typeof fail>[0], string | undefined][] = [
+      ['votes_closed', undefined],
+      ['rate_limited', 'house_daily'],
+      ['rate_limited', 'uid_daily'],
+      ['rate_limited', 'network_daily'],
+      ['rate_limited', 'house_breaker'],
+      ['rate_limited', 'region_breaker'],
+    ];
+    for (const [code, detail] of cases) {
+      const s = run(initialVoteState(10), tap(), tap(), tap(), { type: 'send' }, fail(code, detail));
+      expect([s.total, s.queue.length, s.inFlight]).toEqual([10, 0, false]);
+      expect(nextToSend(s)).toBeUndefined();
+    }
+  });
+
+  it('votes_closed sets closed (panel disables)', () => {
+    const s = run(initialVoteState(10), tap(), tap(), { type: 'send' }, fail('votes_closed'));
+    expect([s.closed, s.total, s.left, canTap(s)]).toEqual([true, 10, 5, false]);
+  });
+
+  it('a settled server answer is not clobbered by a stale pin total (seed)', () => {
+    let s = run(initialVoteState(10), tap(), { type: 'send' }, fail('network'));
+    expect(s.reconciled).toBe(true);
+    s = run(s, { type: 'seed', total: 11 }); // stale pin that still shows the refused vote
+    expect(s.total).toBe(10);
+    expect(run(initialVoteState(10), { type: 'seed', total: 12 }).total).toBe(12); // untouched house: pin wins
   });
 
   it('house_daily forces left = 0', () => {

@@ -20,10 +20,9 @@ interface Props {
   photosRefreshKey?: number;
   votesOpen: boolean;
   /** A vote (or a fresher server count) changed this house's total. */
-  onVoted(houseId: string, total: number): void;
 }
 
-export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey, votesOpen, onVoted }: Props) {
+export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey, votesOpen }: Props) {
   const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin.address)}`;
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
@@ -65,7 +64,6 @@ export default function HouseSheet({ pin, season, year, onClose, onToast, onAddP
             pin={pin}
             season={season}
             votesOpen={votesOpen}
-            onVoted={onVoted}
             onToast={onToast}
             photosOpen={!!onAddPhotos}
             onAddPhotos={onAddPhotos}

@@ -12,6 +12,8 @@ export interface VoteState {
   dailyExhausted: boolean;
   /** votes_closed from the server. */
   closed: boolean;
+  /** True once the server has answered for this house in this session; a stale pin total must not overwrite it. */
+  reconciled: boolean;
   /** Bumps on every accepted tap (drives the "+1" pop). */
   taps: number;
   /** Last settle, for the live region and toasts. `n` bumps each time. */
@@ -28,7 +30,7 @@ export type VoteAction =
   | { type: 'exhaust' };
 
 export function initialVoteState(total: number): VoteState {
-  return { total: clean(total), left: DAILY_LIMIT, queue: [], inFlight: false, dailyExhausted: false, closed: false, taps: 0, note: null };
+  return { total: clean(total), left: DAILY_LIMIT, queue: [], inFlight: false, dailyExhausted: false, closed: false, reconciled: false, taps: 0, note: null };
 }
 
 function clean(n: number): number {
@@ -53,14 +55,22 @@ export function nextToSend(s: VoteState): string | null | undefined {
   return s.inFlight || s.queue.length === 0 ? undefined : s.queue[0];
 }
 
+const TERMINAL_RATE = ['house_daily', 'uid_daily', 'network_daily', 'house_breaker', 'region_breaker'];
+
+/** Errors that would fail every queued tap the same way (so the rest of the queue is dropped, not sent). */
+export function isTerminal(code: DataErrorCode, detail?: string): boolean {
+  if (code === 'votes_closed' || code === 'not_signed_in') return true;
+  return code === 'rate_limited' && detail !== undefined && TERMINAL_RATE.includes(detail);
+}
+
 export function voteReducer(s: VoteState, a: VoteAction): VoteState {
   switch (a.type) {
     case 'sync':
       // Server truth on open; never overwrite optimistic taps that are still pending.
-      return idle(s) ? { ...s, total: clean(a.total), left: Math.min(DAILY_LIMIT, clean(a.left)) } : s;
+      return idle(s) ? { ...s, total: clean(a.total), left: Math.min(DAILY_LIMIT, clean(a.left)), reconciled: true } : s;
     case 'seed':
-      // A fresher house total from a reload of the pins.
-      return idle(s) ? { ...s, total: clean(a.total) } : s;
+      // The pin's count, used until the server answers. Never clobbers a total this session already reconciled.
+      return idle(s) && !s.reconciled ? { ...s, total: clean(a.total) } : s;
     case 'tap':
       if (!canTap(s)) return s;
       return { ...s, total: s.total + 1, left: s.left - 1, queue: [...s.queue, a.photoId], taps: s.taps + 1 };
@@ -74,6 +84,7 @@ export function voteReducer(s: VoteState, a: VoteAction): VoteState {
         ...s,
         queue,
         inFlight: false,
+        reconciled: true,
         // Taps still queued were already counted locally, so add them on top of the server's answer.
         total: clean(a.total) + queue.length,
         left,
@@ -82,8 +93,10 @@ export function voteReducer(s: VoteState, a: VoteAction): VoteState {
     }
     case 'fail': {
       if (!s.inFlight) return s;
-      // Roll back the failed tap and every tap queued behind it (they would fail the same way).
-      const undo = s.queue.length;
+      // Roll back the failed head. Terminal errors would fail every queued tap the same way, so those are dropped
+      // and rolled back too; other errors (a dropped connection, a revoked photo) leave the rest of the queue to be sent.
+      const terminal = isTerminal(a.code, a.detail);
+      const undo = terminal ? s.queue.length : 1;
       let left = Math.min(DAILY_LIMIT, s.left + undo);
       let { dailyExhausted, closed } = s;
       if (a.code === 'rate_limited' && (a.detail === 'house_daily' || a.detail === 'network_daily')) left = 0;
@@ -91,8 +104,9 @@ export function voteReducer(s: VoteState, a: VoteAction): VoteState {
       if (a.code === 'votes_closed') closed = true;
       return {
         ...s,
-        queue: [],
+        queue: terminal ? [] : s.queue.slice(1),
         inFlight: false,
+        reconciled: true,
         total: Math.max(0, s.total - undo),
         left,
         dailyExhausted,
