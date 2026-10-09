@@ -60,22 +60,56 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
   }
 }
 
+interface RawHouse {
+  id: string;
+  address: string;
+  lat: number;
+  lng: number;
+  /** One-to-one embed: an object, or null before the house's first vote. */
+  house_vote_totals?: { votes?: unknown } | { votes?: unknown }[] | null;
+}
+
+const HOUSE_COLS = 'id,address,lat,lng';
+
+function embeddedVotes(h: RawHouse): number {
+  const t = Array.isArray(h.house_vote_totals) ? h.house_vote_totals[0] : h.house_vote_totals;
+  const v = Number(t?.votes ?? 0);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/** Approved-photo counts per house. Any failure means 0 (capped), which fails safe. */
+async function photoCounts(regionId: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const { data, error } = await getSupabase().rpc('get_house_photo_counts', { p_region_id: regionId });
+    if (error || !Array.isArray(data)) return out;
+    for (const r of data as { house_id?: unknown; approved?: unknown }[]) {
+      const n = Number(r?.approved);
+      if (typeof r?.house_id === 'string' && Number.isFinite(n) && n > 0) out.set(r.house_id, Math.floor(n));
+    }
+  } catch {
+    /* capped */
+  }
+  return out;
+}
+
 export async function listMapHouses(regionId: string): Promise<PinView[]> {
   try {
     // Explicit columns, never '*': column grants reject it. RLS applies season/status/active filters.
-    const { data, error } = await getSupabase()
-      .from('houses')
-      .select('id,address,lat,lng')
-      .eq('region_id', regionId)
-      .limit(2000);
+    const sb = getSupabase();
+    const query = (cols: string) => sb.from('houses').select(cols).eq('region_id', regionId).limit(2000);
+    const [first, counts] = await Promise.all([query(`${HOUSE_COLS},house_vote_totals(votes)`), photoCounts(regionId)]);
+    let { data, error } = first;
+    // PGRST200: the votes table isn't deployed yet. Retry once without the embed so the front end can ship first.
+    if (error && (error as { code?: string }).code === 'PGRST200') ({ data, error } = await query(HOUSE_COLS));
     if (error) throw error;
-    return (data ?? []).map((h: { id: string; address: string; lat: number; lng: number }) => ({
+    return ((data ?? []) as unknown as RawHouse[]).map((h) => ({
       id: h.id,
       address: h.address,
       lat: Number(h.lat),
       lng: Number(h.lng),
-      photoCount: 0,
-      votes: 0,
+      photoCount: counts.get(h.id) ?? 0,
+      votes: embeddedVotes(h),
       badges: [],
     }));
   } catch (e) {
