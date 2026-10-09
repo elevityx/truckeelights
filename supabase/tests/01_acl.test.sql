@@ -265,7 +265,7 @@ select is(
         'private.enqueue_storage_job', 'private.finish_storage_job', 'private.house_is_public',
         'private.is_admin', 'private.lock_photo', 'private.lock_quota', 'private.photo_object_readable',
         'private.photo_upload_allowed', 'private.purge_rehearsal', 'private.reconcile_storage',
-        'private.rotate_house_photos', 'private.run_storage_jobs', 'private.set_runner_secret',
+        'private.rotate_house_photos', 'private.run_digest', 'private.run_storage_jobs', 'private.set_digest_secret', 'private.set_runner_secret',
         'private.set_storage_runner', 'private.storage_admin_ok', 'private.storage_job_satisfied',
         'private.storage_object_exists', 'private.sweep_events', 'private.sweep_photos', 'private.take_quota',
         'private.vote_retention',
