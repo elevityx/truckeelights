@@ -23,6 +23,7 @@ interface RawContext {
   submissions_open: boolean;
   wordmark: string;
   photos_open?: boolean;
+  events?: { open?: boolean };
 }
 
 export async function getRegionContext(slug?: string): Promise<RegionContext> {
@@ -52,6 +53,7 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
       submissionsOpen: c.submissions_open,
       wordmark: c.wordmark,
       photosOpen: c.photos_open === true,
+      ...(c.events && typeof c.events === 'object' ? { events: { open: c.events.open === true } } : {}),
     };
   } catch (e) {
     throw e instanceof DataError ? e : toDataError(e);
