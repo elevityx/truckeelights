@@ -224,9 +224,9 @@ export default function HomePage() {
         addChooser={ctx.events ? { eventsOpen: ctx.events.open } : undefined}
         layerSwitch={ctx.events && <LayerSwitch variant="bar" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
       />
-      {ctx.events && <LayerSwitch variant="chips" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
       <div className="pbody">
         <div className="views">
+          {ctx.events && <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
           {view === 'map' ? (
             <MapView
               season={ctx.season}

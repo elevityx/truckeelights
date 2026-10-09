@@ -6,8 +6,8 @@ interface Props {
   onChange(l: Layer): void;
   houses: number;
   events: number;
-  /** 'bar' sits in the header on wide screens; 'chips' is the row under the header on narrower ones. */
-  variant: 'bar' | 'chips';
+  /** 'bar' sits in the header on wide screens; 'float' is the pill over the top of the map or list on narrower ones. */
+  variant: 'bar' | 'float';
 }
 
 const OPTIONS: [Layer, string][] = [
@@ -19,7 +19,7 @@ const OPTIONS: [Layer, string][] = [
 /** Houses · Events · Both. One state drives the map and the list. */
 export default function LayerSwitch({ layer, onChange, houses, events, variant }: Props) {
   return (
-    <div className={variant === 'bar' ? 'seg layerseg' : 'layerchips'} role="group" aria-label="Show on the map and list">
+    <div className={variant === 'bar' ? 'seg layerseg' : 'layerfloat'} role="group" aria-label="Show on the map and list">
       {OPTIONS.map(([value, label]) => {
         const n = value === 'houses' ? houses : value === 'events' ? events : null;
         return (
