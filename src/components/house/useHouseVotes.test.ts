@@ -182,6 +182,47 @@ describe('stale async results', () => {
     expect(_store.get('h2', 10)).toMatchObject({ total: 10, left: 5, note: { error: true } });
   });
 
+  describe('ambiguous votes with later successes in the queue', () => {
+    const twoTaps = async (status: { totalVotes: number; leftToday: number }, second: unknown) => {
+      _store.get('h1', 10);
+      let rejA!: (e: unknown) => void;
+      api.voteHouse.mockReturnValueOnce(new Promise((_, r) => (rejA = r))).mockResolvedValueOnce(second);
+      api.getMyVoteStatus.mockResolvedValue(status);
+      await _store.tap('h1', null, 'panel');
+      await _store.tap('h1', null, 'panel');
+      rejA(new TypeError('down'));
+      await flush();
+      return _store.get('h1', 10);
+    };
+
+    it('ambiguous then success, both committed: no failure note', async () => {
+      const st = await twoTaps({ totalVotes: 12, leftToday: 3 }, { totalVotes: 12, leftToday: 3 });
+      expect(st.note?.error).toBe(false);
+      expect(st).toMatchObject({ total: 12, left: 3, pendingFail: null });
+    });
+
+    it('ambiguous not committed then success: failure note', async () => {
+      const st = await twoTaps({ totalVotes: 11, leftToday: 4 }, { totalVotes: 11, leftToday: 4 });
+      expect(st.note?.error).toBe(true);
+      expect(st).toMatchObject({ total: 11, left: 4 });
+    });
+
+    it('two ambiguous taps, one committed: failure note, server totals kept', async () => {
+      _store.get('h1', 10);
+      let rejA!: (e: unknown) => void;
+      let rejB!: (e: unknown) => void;
+      api.voteHouse.mockReturnValueOnce(new Promise((_, r) => (rejA = r))).mockReturnValueOnce(new Promise((_, r) => (rejB = r)));
+      api.getMyVoteStatus.mockResolvedValue({ totalVotes: 11, leftToday: 4 });
+      await _store.tap('h1', null, 'panel');
+      await _store.tap('h1', null, 'panel');
+      rejA(new TypeError('down'));
+      await flush();
+      rejB(new TypeError('down'));
+      await flush();
+      expect(_store.get('h1', 10)).toMatchObject({ total: 11, left: 4, note: { error: true }, recon: null });
+    });
+  });
+
   it('a failed re-read still surfaces the failure text', async () => {
     _store.get('h1', 10);
     api.voteHouse.mockRejectedValue(new TypeError('network down'));

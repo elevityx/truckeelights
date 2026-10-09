@@ -80,6 +80,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
       },
       {
         allowTypes: EVENT_PLACE_TYPES,
+        generation: geoSeq.current, // a pin drop (begin) retires a still-pending selection
         onReject: () => {
           geoSeq.current.invalidate(); // a pending reverse geocode must not re-arm the location cleared below
           // The autocomplete already swapped its text for the rejected pick, so drop the earlier valid location too.

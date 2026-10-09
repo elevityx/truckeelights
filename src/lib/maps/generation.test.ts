@@ -29,4 +29,14 @@ describe('createGeneration', () => {
     if (g.isCurrent(town)) applied.push('town');
     expect(applied).toEqual(['venue']);
   });
+
+  it('a pin drop retires an in-flight autocomplete selection sharing the counter', () => {
+    const g = createGeneration();
+    const select = g.begin(); // venue chosen, fetchFields in flight
+    const pin = g.begin(); // pin dropped meanwhile
+    let place = 'pin';
+    if (g.isCurrent(select)) place = 'venue'; // the late selection callback
+    expect(place).toBe('pin');
+    expect(g.isCurrent(pin)).toBe(true);
+  });
 });

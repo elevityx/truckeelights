@@ -25,6 +25,8 @@ export interface PickerOptions {
    */
   allowTypes?: readonly string[];
   onReject?: (p: PickedPlace) => void;
+  /** Shared with other async location work (a pin drop's reverse geocode): a newer token there retires a pending selection here. */
+  generation?: ReturnType<typeof createGeneration>;
 }
 
 /** Spec_Events A3: what the event autocomplete accepts (a town or a bare route is not a place to go). */
@@ -79,7 +81,7 @@ export function createAddressPicker(
   let dead = false;
   let node: HTMLElement | null = null;
   let stubCleanup: (() => void) | null = null;
-  const selections = createGeneration(); // a slower earlier gmp-select must not land after a newer one
+  const selections = o.generation ?? createGeneration(); // a slower earlier gmp-select must not land after a newer one
 
   void (async () => {
     try {
