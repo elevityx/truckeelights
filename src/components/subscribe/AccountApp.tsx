@@ -611,8 +611,14 @@ function DeleteCard({ api, email, onDeleted, say }: { api: SubscribeApi; email: 
       if (r === 'reauth') setReauth(true);
       else onDeleted();
     } catch (e) {
-      const code = toDataError(e).code;
-      setErr(code === 'forbidden' ? 'Admin accounts can’t be deleted here.' : ownerActionMessage(code));
+      const de = toDataError(e);
+      setErr(
+        de.code === 'forbidden'
+          ? 'Admin accounts can’t be deleted here.'
+          : de.detail === 'delete_unconfirmed'
+            ? 'We couldn’t confirm the deletion yet. Tap Delete forever again. It’s safe to repeat.'
+            : ownerActionMessage(de.code),
+      );
     } finally {
       setBusy(false);
     }

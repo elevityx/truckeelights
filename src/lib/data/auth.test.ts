@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authError, jwtIsAnonymous } from './auth';
+import { authError, deleteAccountWithRetry, jwtIsAnonymous } from './auth';
 import { tokenExpired, tokenPurpose, toLinkPrefs } from './emailLinks';
 import { DataError } from './types';
 
@@ -52,5 +52,32 @@ describe('email link tokens (shape only)', () => {
   it('maps the function’s prefs reply defensively', () => {
     expect(toLinkPrefs({ status: 'stopped', houses: true, events: 'yes', cadence: 'weekly' })).toEqual({ status: 'stopped', houses: true, events: false, cadence: 'weekly' });
     expect(toLinkPrefs(null)).toEqual({ status: 'active', houses: false, events: false, cadence: 'daily' });
+  });
+});
+
+describe('deleteAccountWithRetry (delete-account is idempotent)', () => {
+  const run = (codes: string[]) => {
+    const seen: string[] = [];
+    const attempt = () => { const c = codes.shift() ?? ''; seen.push(c); return Promise.resolve(c); };
+    return { seen, p: deleteAccountWithRetry(attempt, () => Promise.resolve()) };
+  };
+  it('ok on the first answer', async () => {
+    await expect(run(['']).p).resolves.toBe('ok');
+  });
+  it('a retry answer or a lost response is retried with the same session; the repeat finds the account gone -> ok', async () => {
+    const r = run(['retry', 'network', '']);
+    await expect(r.p).resolves.toBe('ok');
+    expect(r.seen).toEqual(['retry', 'network', '']);
+  });
+  it('still unknown after three tries: delete_unconfirmed (never "nothing changed")', async () => {
+    const r = run(['retry', 'retry', 'retry', '']);
+    await expect(r.p).rejects.toMatchObject({ code: 'unknown', detail: 'delete_unconfirmed' });
+    expect(r.seen.length).toBe(3);
+  });
+  it('reauth, forbidden and not_signed_in are final', async () => {
+    await expect(run(['reauth_required']).p).resolves.toBe('reauth');
+    await expect(run(['forbidden']).p).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(run(['not_signed_in']).p).rejects.toMatchObject({ code: 'not_signed_in' });
+    await expect(run(['weird']).p).rejects.toMatchObject({ code: 'unknown' });
   });
 });

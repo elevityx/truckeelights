@@ -15,7 +15,7 @@ export interface DigestRecipient {
   run_id: string;
   user_id: string;
   email: string;
-  /** Stored on the row: `digest:<public_id>:<window start ISO>`, sent as Resend's Idempotency-Key on every attempt. */
+  /** Stored on the row: `digest:<public_id>:<window start ISO>/<window end ISO>`, Resend's Idempotency-Key on every attempt. */
   idempotency_key: string;
   /** End of the row's content window (ISO). Anything time-based in the email derives from it, so a retry is identical. */
   window_to: string;
@@ -29,6 +29,22 @@ export interface DigestRecipient {
   house_total: number;
   events: DigestEvent[];
   event_total: number;
+  /**
+   * The email stored on the row by `svc_digest_store_payload` when it was first claimed, or null (a new claim, or a
+   * crash before the store: Resend never saw the key, so a fresh render is safe). A resumed row with a payload is sent
+   * from it verbatim, never re-rendered.
+   */
+  payload: StoredPayload | null;
+}
+
+/** The exact email sent for a `digest_sends` row (jsonb on the row). */
+export interface StoredPayload {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  headers: Record<string, string>;
 }
 
 /** `svc_digest_finish(run_id)`: the run's totals from the ledger. */
@@ -52,6 +68,12 @@ export interface DigestDb {
    * last_sent_through); else failed. Ambiguous outcomes are not marked (the row stays `sending` and is resumed).
    */
   mark(runId: string, userId: string, ok: boolean, errorCode: string | null): Promise<boolean>;
+  /**
+   * `svc_digest_store_payload(run_id, user_id, subject, html, text, from, to, headers)` BEFORE the provider call:
+   * stores the rendered email on the `sending` row once. Throws on a different payload already stored
+   * (payload_conflict) or no `sending` row; the caller then does not send.
+   */
+  storePayload(runId: string, userId: string, payload: StoredPayload): Promise<void>;
   finish(runId: string): Promise<RunTotals>;
 }
 
@@ -113,6 +135,13 @@ export function digestDb(sb: SupabaseClient): DigestDb {
       return (await rpc<boolean>(sb, 'svc_digest_mark', {
         p_run_id: runId, p_user_id: userId, p_ok: ok, p_error_code: errorCode,
       })) === true;
+    },
+    async storePayload(runId, userId, p) {
+      const r = await rpc<string>(sb, 'svc_digest_store_payload', {
+        p_run_id: runId, p_user_id: userId, p_subject: p.subject, p_html: p.html, p_text: p.text,
+        p_from: p.from, p_to: p.to, p_headers: p.headers,
+      });
+      if (r !== 'stored' && r !== 'same') throw new RpcError('svc_digest_store_payload unexpected');
     },
     async finish(runId) {
       const row = first(await rpc<RunTotals[] | null>(sb, 'svc_digest_finish', { p_run_id: runId }));

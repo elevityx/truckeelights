@@ -1,4 +1,4 @@
-// Resend over plain fetch. Every send carries the row's stored Idempotency-Key (digest:<public_id>:<window start>), so a
+// Resend over plain fetch. Every send carries the row's stored Idempotency-Key (digest:<public_id>:<window>), so a
 // retry after a crash between "Resend accepted" and "we recorded it" is deduplicated by Resend (24 h). Errors become
 // short codes; provider text is dropped. An outcome where Resend MAY have accepted the email (timeout, network error,
 // 5xx) is `ambiguous`: the caller leaves the row `sending` so it is resumed later with the same key, never re-keyed.

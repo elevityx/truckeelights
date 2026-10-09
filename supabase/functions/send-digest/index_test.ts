@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from '@std/assert';
-import type { DigestDb, DigestRecipient, RunTotals } from '../_shared/db.ts';
+import type { DigestDb, DigestRecipient, RunTotals, StoredPayload } from '../_shared/db.ts';
 import { BUDGET_MS, MAX_SENDS, runDigest, type RunConfig } from '../_shared/digestRun.ts';
 import { dueKinds } from '../_shared/pacific.ts';
 import { sendEmail, type OutgoingEmail, type SendResult } from '../_shared/resend.ts';
@@ -24,7 +24,7 @@ const cfg = (over: Partial<RunConfig> = {}): RunConfig => ({
   hmacSecret: 'hmac-test', resendKey: 're_test', paceMs: 0, now: () => NOW, ...over,
 });
 
-type Row = Omit<DigestRecipient, 'idempotency_key' | 'run_id' | 'window_to'> & { window_from: string };
+type Row = Omit<DigestRecipient, 'idempotency_key' | 'run_id' | 'window_to' | 'payload'> & { window_from: string };
 // A subscriber as svc_digest_batch sees it (the key, run and window are filled in by the fake, as the SQL does).
 const recipient = (n: number, withContent = true): Row => ({
   user_id: uid(n), email: `person${n}@example.test`, public_id: uid(1000 + n), token_version: 2,
@@ -32,10 +32,15 @@ const recipient = (n: number, withContent = true): Row => ({
   houses: withContent ? [{ id: uid(5000 + n), address: `${n} Pine St` }] : [], house_total: withContent ? 1 : 0,
   events: [], event_total: 0, window_from: WINDOW_FROM,
 });
-const keyOf = (n: number) => `digest:${uid(1000 + n)}:${WINDOW_FROM}`;
+const keyOf = (n: number, to = WINDOW_TO) => `digest:${uid(1000 + n)}:${WINDOW_FROM}/${to}`;
+/** The request body sendEmail would POST: what Resend compares for a reused key. */
+const wire = (e: OutgoingEmail) => JSON.stringify(e);
 
 type Status = 'sending' | 'sent' | 'failed';
-interface Entry { run: string; user: string; status: Status; attempts: number; key: string; windowTo: string; touched: number }
+interface Entry {
+  run: string; user: string; status: Status; attempts: number; key: string; windowTo: string; touched: number;
+  payload: StoredPayload | null;
+}
 interface Fake extends DigestDb {
   runId: string;
   windowTo: string;
@@ -44,23 +49,29 @@ interface Fake extends DigestDb {
   advanced: Set<string>; // users whose last_sent_through moved
   marks: string[];
   capHit: boolean;
+  stores: number;
 }
 
 /**
  * Mirrors the SQL contract of svc_digest_* (20261016000200):
  *  - batch resumes, first, any user's `sending` row (any run) idle for 5 minutes, with that row's run, key and window;
- *  - then claims people with content, no unresolved send and no row in this run, with key digest:<public_id>:<window start>;
- *  - stops at the cap (sent + sending today), setting cap_hit;
- *  - mark changes only a `sending` row and advances last_sent_through only on ok.
+ *    and that row's stored payload (returned the way jsonb does: a fresh object, header keys in another order);
+ *  - then claims people with content, no unresolved send and no row in this run, with key
+ *    digest:<public_id>:<window start>/<window end>;
+ *  - only NEW claims are limited by the cap (rows claimed today that are sent or sending), setting cap_hit; a resume
+ *    needs no room;
+ *  - storePayload stores once, accepts the same payload again, refuses a different one;
+ *  - mark changes only a `sending` row, clears its payload, and advances last_sent_through only on ok.
  */
 function fakeDb(rows: Row[], c: { now: () => Date }, opts: { cap?: number; sentToday?: number } = {}): Fake {
   const f: Fake = {
-    runId: RUN, windowTo: WINDOW_TO, cap: opts.cap ?? 500, ledger: new Map(), advanced: new Set(), marks: [], capHit: false,
+    runId: RUN, windowTo: WINDOW_TO, cap: opts.cap ?? 500, ledger: new Map(), advanced: new Set(), marks: [], capHit: false, stores: 0,
     start: () => Promise.resolve(f.runId),
     batch(run, limit) {
       const now = c.now().getTime();
       const usedToday = (opts.sentToday ?? 0) + [...f.ledger.values()].filter((l) => l.status !== 'failed').length;
-      const room = Math.max(0, Math.min(limit, 100, f.cap - usedToday));
+      const room = Math.max(0, f.cap - usedToday);
+      let fresh_n = 0;
       const out: DigestRecipient[] = [];
       const open = (u: string) => [...f.ledger.values()].find((l) => l.user === u && l.status === 'sending');
       const resumes: { row: Row; resume?: Entry }[] = [];
@@ -73,21 +84,35 @@ function fakeDb(rows: Row[], c: { now: () => Date }, opts: { cap?: number; sentT
         fresh.push({ row: r });
       }
       for (const { row: r, resume } of [...resumes, ...fresh]) {
-        if (out.length >= room) { f.capHit = true; break; }
+        if (out.length >= Math.min(limit, 100)) break;
         let e = resume;
         if (e) { e.attempts++; e.touched = now; } else {
-          e = { run, user: r.user_id, status: 'sending', attempts: 1, key: `digest:${r.public_id}:${r.window_from}`, windowTo: f.windowTo, touched: now };
+          if (fresh_n >= room) { f.capHit = true; break; }
+          fresh_n++;
+          e = { run, user: r.user_id, status: 'sending', attempts: 1, key: `digest:${r.public_id}:${r.window_from}/${f.windowTo}`, windowTo: f.windowTo, touched: now, payload: null };
           f.ledger.set(`${run}:${r.user_id}`, e);
         }
         const { window_from: _w, ...rest } = r;
-        out.push({ ...rest, run_id: e.run, idempotency_key: e.key, window_to: e.windowTo });
+        out.push({ ...rest, run_id: e.run, idempotency_key: e.key, window_to: e.windowTo, payload: e.payload ? asJsonb(e.payload) : null });
       }
       return Promise.resolve(out);
+    },
+    storePayload(run, user, p) {
+      const l = f.ledger.get(`${run}:${user}`);
+      if (!l || l.status !== 'sending') return Promise.reject(new Error('not_found'));
+      f.stores++;
+      if (l.payload) {
+        if (canon(l.payload) !== canon(p)) return Promise.reject(new Error('payload_conflict'));
+        return Promise.resolve();
+      }
+      l.payload = JSON.parse(JSON.stringify(p));
+      return Promise.resolve();
     },
     mark(run, user, ok, err) {
       const l = f.ledger.get(`${run}:${user}`);
       if (!l || l.status !== 'sending') return Promise.resolve(false);
       l.status = ok ? 'sent' : 'failed';
+      l.payload = null;
       f.marks.push(`${user}:${ok ? 'sent' : 'failed'}:${err ?? ''}`);
       if (ok) f.advanced.add(user);
       return Promise.resolve(true);
@@ -98,6 +123,13 @@ function fakeDb(rows: Row[], c: { now: () => Date }, opts: { cap?: number; sentT
     },
   };
   return f;
+}
+/** Key-order-insensitive comparison, as jsonb equality is. */
+const canon = (p: StoredPayload) => JSON.stringify(p, Object.keys({ ...p, ...p.headers }).sort());
+/** What PostgREST hands back for a jsonb column: a new object; jsonb does not keep key order (reverse it here). */
+function asJsonb(p: StoredPayload): StoredPayload {
+  const rev = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).reverse()) as T;
+  return rev({ ...JSON.parse(JSON.stringify(p)), headers: rev(p.headers) });
 }
 const okSend = (): Promise<SendResult> => Promise.resolve({ ok: true as const, id: 'rid' });
 
@@ -130,7 +162,8 @@ Deno.test('idempotent rerun: a second run of the same day sends nothing', async 
 
 Deno.test('crash after Resend accepted (mark lost): the next tick resends the SAME key and the SAME payload', async () => {
   const c = clock();
-  const db = fakeDb([recipient(1)], c);
+  const rows = [recipient(1)];
+  const db = fakeDb(rows, c);
   const sent: { key: string; email: OutgoingEmail }[] = [];
   const send = (k: string, e: OutgoingEmail) => { sent.push({ key: k, email: e }); return okSend(); };
   const realMark = db.mark;
@@ -139,6 +172,11 @@ Deno.test('crash after Resend accepted (mark lost): the next tick resends the SA
   try { await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send }); } catch { threw = true; }
   assert(threw);
   db.mark = realMark;
+  assertEquals(db.stores, 1); // stored before the provider call
+  // Meanwhile the live data changes: a different house list and a bumped link version.
+  rows[0].houses = [{ id: uid(5999), address: '99 Other St' }];
+  rows[0].house_total = 1;
+  rows[0].token_version = 3;
   // 4 minutes later the row is still "in flight": nothing is handed out again.
   c.advance(4 * 60_000);
   await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
@@ -148,18 +186,38 @@ Deno.test('crash after Resend accepted (mark lost): the next tick resends the SA
   const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
   assertEquals(s.sent, 1);
   assertEquals(sent.map((x) => x.key), [keyOf(1), keyOf(1)]);
-  assertEquals(sent[1].email, sent[0].email); // byte-identical (Resend rejects a reused key with a different payload)
+  // byte-identical although the content changed: the stored payload is sent, never a re-render
+  assertEquals(wire(sent[1].email), wire(sent[0].email));
+  assertEquals(db.stores, 1); // a resume never stores (or renders) again
+  assertEquals(db.ledger.get(`${RUN}:${uid(1)}`)?.payload, null); // cleared once sent
+});
+
+Deno.test('crash BEFORE the payload was stored: the resume renders fresh (Resend never saw the key) and stores it', async () => {
+  const c = clock();
+  const db = fakeDb([recipient(1)], c);
+  const realStore = db.storePayload;
+  db.storePayload = () => Promise.reject(new Error('lost'));
+  const sends: string[] = [];
+  const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: (k) => { sends.push(k); return okSend(); } });
+  assertEquals([s.sent, s.pending, sends.length], [0, 1, 0]); // never sent without a stored payload
+  assertEquals(db.ledger.get(`${RUN}:${uid(1)}`)?.status, 'sending');
+  db.storePayload = realStore;
+  c.advance(10 * 60_000);
+  const s2 = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send: (k) => { sends.push(k); return okSend(); } });
+  assertEquals([s2.sent, sends], [1, [keyOf(1)]]);
 });
 
 Deno.test('accepted send + failed mark, then the NEXT DAY run: the unresolved row is resumed with its own key and window', async () => {
   const c = clock();
-  const db = fakeDb([recipient(1)], c);
+  const rows = [recipient(1)];
+  const db = fakeDb(rows, c);
   const sent: { key: string; email: OutgoingEmail }[] = [];
   const send = (k: string, e: OutgoingEmail) => { sent.push({ key: k, email: e }); return okSend(); };
   const realMark = db.mark;
   db.mark = () => Promise.reject(new Error('mark lost'));
   try { await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send }); } catch { /* crash */ }
   db.mark = realMark;
+  rows[0].houses = []; rows[0].house_total = 0; rows[0].events = [{ id: uid(7000), title: 'New', starts_at: '2026-12-08T02:00:00Z' }]; rows[0].event_total = 1;
   // No tick that evening got to it. The next evening is a new run with a later window.
   c.advance(22 * 3600_000);
   db.runId = RUN2;
@@ -167,7 +225,7 @@ Deno.test('accepted send + failed mark, then the NEXT DAY run: the unresolved ro
   const s = await runDigest('daily', '2026-12-05', cfg({ now: c.now }), { db, send });
   assertEquals(s.sent, 1);
   assertEquals(sent.map((x) => x.key), [keyOf(1), keyOf(1)]); // never a new key while the old send is unresolved
-  assertEquals(sent[1].email, sent[0].email);
+  assertEquals(wire(sent[1].email), wire(sent[0].email)); // the stored payload, not the changed content
   assertEquals(db.ledger.get(`${RUN}:${uid(1)}`)?.status, 'sent'); // the original row is the one resolved
   assertEquals(db.ledger.has(`${RUN2}:${uid(1)}`), false);
 });
@@ -203,6 +261,23 @@ Deno.test('daily cap comes from the database and is reported', async () => {
   assertEquals([s2.sent, s2.capHit], [0, true]);
 });
 
+Deno.test('cap: stale sending rows are resumed even when they are what fills the cap (charged once, when claimed)', async () => {
+  const c = clock();
+  const db = fakeDb([1, 2, 3].map((n) => recipient(n)), c, { cap: 3 });
+  const keys: string[] = [];
+  let n = 0;
+  const send = (k: string): Promise<SendResult> => {
+    keys.push(k);
+    return Promise.resolve(++n <= 3 ? { ok: false, code: 'network', ambiguous: true } : { ok: true, id: 'ok' });
+  };
+  const s = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
+  assertEquals([s.sent, s.pending, s.capHit], [0, 3, false]); // three claims, all ambiguous: the cap is now full
+  c.advance(10 * 60_000);
+  const s2 = await runDigest('daily', '2026-12-04', cfg({ now: c.now }), { db, send });
+  assertEquals([s2.sent, s2.capHit], [3, false]); // all three resumed, no new room needed
+  assertEquals(keys, [keyOf(1), keyOf(2), keyOf(3), keyOf(1), keyOf(2), keyOf(3)]);
+});
+
 Deno.test('malformed content is released as failed (empty_render) without a send', async () => {
   const bad = { ...recipient(1), houses: [{ id: 'not-a-uuid', address: 'x' }] };
   const db = fakeDb([bad], { now: () => NOW });
@@ -214,7 +289,7 @@ Deno.test('malformed content is released as failed (empty_render) without a send
   assertEquals([s2.sent, s2.skipped, db2.ledger.size], [0, 0, 0]);
 });
 
-Deno.test('a definite Resend failure (4xx) is failed with a code, does not advance, and the next run reuses the window key', async () => {
+Deno.test('a definite Resend failure (4xx) is failed with a code, does not advance, and the next run uses a new key', async () => {
   const db = fakeDb([recipient(1), recipient(2)], { now: () => NOW });
   let n = 0;
   const s = await runDigest('daily', '2026-12-04', cfg(), { db, send: () => Promise.resolve(++n === 1 ? { ok: false as const, code: 'http_422' } : { ok: true as const, id: 'ok' }) });
@@ -226,8 +301,10 @@ Deno.test('a definite Resend failure (4xx) is failed with a code, does not advan
   assertEquals(again.sent + again.failed, 0);
   db.runId = RUN2;
   const keys: string[] = [];
+  db.windowTo = '2026-12-06T02:07:00Z';
   const next = await runDigest('daily', '2026-12-05', cfg(), { db, send: (k) => { keys.push(k); return okSend(); } });
-  assertEquals([next.sent, keys], [1, [keyOf(1)]]); // same content window -> same key
+  // a definitely refused key is never reused: the next run's row has a later window end, so a new key
+  assertEquals([next.sent, keys], [1, [keyOf(1, '2026-12-06T02:07:00Z')]]);
 });
 
 Deno.test('bounded worker: stops at the time budget, leaves claimed rows for the next tick, which finishes them', async () => {

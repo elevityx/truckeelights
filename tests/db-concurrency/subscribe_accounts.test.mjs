@@ -233,9 +233,10 @@ test('daily and weekly digest batches in parallel never exceed the shared daily 
     for (let it = 0; it < 4; it += 1) {
       // A fresh, unique pair of runs per iteration (dates far from real ones), and a cap with room for exactly 5.
       const date = `2099-0${it + 1}-0${it + 1}`;
+      // cap use = rows claimed today that are sent or still sending (each row charged once, on its claim day)
       const used = await qn(`select count(*) from private.digest_sends d
-         where (d.status = 'sent' and d.sent_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')
-            or (d.status = 'sending' and d.updated_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')`);
+         where d.status in ('sent', 'sending')
+           and d.created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'`);
       await q(`update public.app_settings set digest_daily_cap = ${used + 5}`);
       const daily = await q(svcTx(`select public.svc_digest_start('daily', ${lit(date)});`));
       const weekly = await q(svcTx(`select public.svc_digest_start('weekly', ${lit(date)});`));
@@ -252,5 +253,27 @@ test('daily and weekly digest batches in parallel never exceed the shared daily 
     await q(`update public.app_settings set digest_daily_cap = ${Number(before)}`);
     if (runs.length) await q(`delete from private.digest_runs where run_id in (${runs.map(lit).join(',')})`);
     if (subs.length) await q(`delete from public.subscriptions where user_id in (${subs.map(lit).join(',')})`);
+  }
+});
+
+test('two workers storing different payloads on one digest row in parallel: exactly one is kept, the other is refused', async () => {
+  const runs = [];
+  const u = await makeUser();
+  try {
+    for (let it = 0; it < 4; it += 1) {
+      const run = await q(svcTx(`select public.svc_digest_start('daily', ${lit(`2098-0${it + 1}-0${it + 1}`)});`));
+      runs.push(run);
+      await q(`insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to)
+               values (${lit(run)}, ${lit(u.id)}, 'sending',
+                       ${lit(`digest:${crypto.randomUUID()}:2098-01-01T00:00:00.000000Z/2098-01-02T00:00:00.000000Z`)}, now(), now())`);
+      const store = (html) => psql(svcTx(`select public.svc_digest_store_payload(${lit(run)}, ${lit(u.id)}, 'S', ${lit(html)}, 't',
+                                           'F <f@example.test>', ${lit(u.email)}, '{}'::jsonb);`));
+      const results = await Promise.all([store('<p>one</p>'), store('<p>two</p>')]);
+      assert.deepEqual(tally(results), { ok: 1, payload_conflict: 1 }, results.map((r) => r.err).join(' / '));
+      const winner = results[0].code === 0 ? '<p>one</p>' : '<p>two</p>';
+      assert.equal(await q(`select payload ->> 'html' from private.digest_sends where run_id = ${lit(run)} and user_id = ${lit(u.id)}`), winner);
+    }
+  } finally {
+    if (runs.length) await q(`delete from private.digest_runs where run_id in (${runs.map(lit).join(',')})`);
   }
 });

@@ -87,4 +87,10 @@ describe('digest emails today vs the daily cap', () => {
     expect(usageBanner(d(10, true))).toMatch(/reached its daily cap/);
     for (const n of [400, 500]) expect(usageBanner(d(n))).not.toMatch(/Resend|upgrade|sign-in/i);
   });
+  it('the cap message is true for weekly subscribers too: their next digest run, not "the next evening"', () => {
+    const b = usageBanner(d(500)) ?? '';
+    expect(b).toMatch(/next digest run/);
+    expect(b).toMatch(/weekly/);
+    expect(b).not.toMatch(/left some people for the next evening/);
+  });
 });

@@ -6,7 +6,7 @@
 -- events.approved_at, and the svc_* routines (service_role only; digest idempotency and cap; unsubscribe; delete).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(186);
+select plan(197);
 
 -- ---------------------------------------------------------------- fixtures (as postgres)
 delete from public.admins;
@@ -74,10 +74,12 @@ language sql as $$
           case when p_status = 'released' then now() end, p_created_by)
   returning id
 $$;
--- The expected provider key for a subscriber now: digest:<public_id>:<last_sent_through, ISO UTC with microseconds>.
-create function test_helpers.digest_key(p_uid uuid) returns text language sql as $$
+-- The expected provider key for a subscriber claimed by a run now:
+-- digest:<public_id>:<last_sent_through>/<run window_to> (ISO UTC with microseconds).
+create function test_helpers.digest_key(p_uid uuid, p_run uuid) returns text language sql as $$
   select 'digest:' || s.public_id::text || ':' || to_char(s.last_sent_through at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
-    from public.subscriptions s where s.user_id = p_uid
+         || '/' || to_char(r.window_to at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+    from public.subscriptions s, private.digest_runs r where s.user_id = p_uid and r.run_id = p_run
 $$;
 grant execute on all functions in schema test_helpers to anon, authenticated, service_role;
 
@@ -468,7 +470,7 @@ select is(test_helpers.err($$select public.svc_digest_start('hourly', null)$$), 
 -- window_to is the run's start; move it forward so the 5-minute-old items are inside the window (the run started "now").
 reset role;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run')::uuid;
-select set_config('t.key1', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001'), true);
+select set_config('t.key1', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001', current_setting('t.run')::uuid), true);
 set local role service_role;
 select set_config('t.b', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run')::uuid, 100) b), true);
 reset role;
@@ -476,7 +478,8 @@ select is((select string_agg((e ->> 'email') || '|' || (e ->> 'house_total') || 
                              || '|' || (e -> 'events' -> 0 ->> 'title'), ',') from json_array_elements(current_setting('t.b')::json) e),
   'alice@example.test|1|1|8 Sub St, Subtown|Fake Lantern Walk', 'svc_digest_batch: only daily subscribers with something new');
 select is(current_setting('t.b')::json -> 0 ->> 'idempotency_key', current_setting('t.key1'),
-  'C8: the key is per content window: digest:<public_id>:<last_sent_through ISO>');
+  'C8: the key is per content window: digest:<public_id>:<last_sent_through ISO>/<window_to ISO>');
+select ok((current_setting('t.b')::json -> 0 ->> 'payload') is null, 'a new claim carries no stored payload (render fresh)');
 select is(current_setting('t.b')::json -> 0 ->> 'run_id', current_setting('t.run'), 'the row belongs to this run');
 select is((select d.idempotency_key || '|' || (d.window_from = s.last_sent_through)::text from private.digest_sends d
              join public.subscriptions s on s.user_id = d.user_id where d.run_id = current_setting('t.run')::uuid),
@@ -503,7 +506,7 @@ reset role;
 select ok((select cap_hit from private.digest_runs where run_id = current_setting('t.run2')::uuid), 'cap hit is recorded on the run');
 update public.app_settings set digest_daily_cap = 500;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run2')::uuid;
-select set_config('t.key2', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001'), true);
+select set_config('t.key2', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001', current_setting('t.run2')::uuid), true);
 set local role service_role;
 select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), current_setting('t.key2'),
   'below the cap again -> handed out with the window key');
@@ -518,14 +521,32 @@ select test_helpers.as_('admin1');
 set local role authenticated;
 select is((select row(sent, failed, cap_hit)::text from public.admin_digest_today()), '(1,1,t)', 'admin_digest_today reflects the day');
 reset role;
--- C8: the failed person is handed out again by the NEXT run with the SAME key (same content window).
+-- C8: the failed person is handed out again by the NEXT run with a NEW key (a definite refusal is never reused).
 set local role service_role;
 select set_config('t.run3', public.svc_digest_start('daily', '2026-10-22')::text, true);
 reset role;
-update private.digest_runs set window_to = now() where run_id = current_setting('t.run3')::uuid;
+update private.digest_runs set window_to = now() + interval '1 second' where run_id = current_setting('t.run3')::uuid;
+select set_config('t.key3', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001', current_setting('t.run3')::uuid), true);
 set local role service_role;
 select is((select string_agg(run_id::text || '|' || idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
-  current_setting('t.run3') || '|' || current_setting('t.key2'), 'C8: the next run retries a failed send with the same window key');
+  current_setting('t.run3') || '|' || current_setting('t.key3'), 'C8: the next run retries a failed send under a new key (its window end)');
+select isnt(current_setting('t.key3'), current_setting('t.key2'), 'the failed row''s key is not reused');
+-- The rendered email is stored once, before the provider call.
+select is(public.svc_digest_store_payload(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001',
+  'Subj', '<p>A+B</p>', 'A+B', 'TL <d@example.test>', 'alice@example.test', '{"List-Unsubscribe": "<x>"}'), 'stored', 'svc_digest_store_payload stores the payload');
+select is(public.svc_digest_store_payload(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001',
+  'Subj', '<p>A+B</p>', 'A+B', 'TL <d@example.test>', 'alice@example.test', '{"List-Unsubscribe": "<x>"}'), 'same', 'the same payload again is a no-op');
+select is(test_helpers.err($$select public.svc_digest_store_payload('$$ || current_setting('t.run3') || $$', 'f5000000-0000-4000-a000-000000000001',
+  'Subj', '<p>A only</p>', 'A only', 'TL <d@example.test>', 'alice@example.test', '{"List-Unsubscribe": "<x>"}')$$), 'payload_conflict',
+  'a DIFFERENT second payload is refused');
+select is(test_helpers.err($$select public.svc_digest_store_payload('$$ || current_setting('t.run2') || $$', 'f5000000-0000-4000-a000-000000000001',
+  's', 'h', 't', 'f', 'alice@example.test', null)$$), 'not_found', 'store_payload only touches a sending row');
+reset role;
+select is((select payload ->> 'html' from private.digest_sends where run_id = current_setting('t.run3')::uuid), '<p>A+B</p>', 'the first payload is kept');
+select test_helpers.as_('alice');
+set local role authenticated;
+select is(test_helpers.err($$select public.svc_digest_store_payload(null, null, 's', 'h', 't', 'f', 'x', null)$$),
+  'permission denied for function svc_digest_store_payload', 'authenticated: svc_digest_store_payload -> no EXECUTE');
 reset role;
 -- A crash between the provider call and the mark: the row stays `sending`. Under 5 idle minutes it is in flight ...
 update private.digest_sends set updated_at = now() - interval '4 minutes' where run_id = current_setting('t.run3')::uuid;
@@ -535,12 +556,22 @@ reset role;
 -- ... after 5 minutes the next cron tick resumes it with the same key.
 update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run3')::uuid;
 set local role service_role;
-select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)), current_setting('t.key2'),
-  'C8: a stale sending row (crash between send and mark) is resumed with the same idempotency key');
+-- State changes between the accepted send and the resume: alice drops events and her link version moves.
+update public.subscriptions set events = false, token_version = token_version + 1 where user_id = 'f5000000-0000-4000-a000-000000000001';
+set local role service_role;
+select set_config('t.b3', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run3')::uuid, 100) b), true);
 reset role;
+select is((select string_agg(e ->> 'idempotency_key', ',') from json_array_elements(current_setting('t.b3')::json) e), current_setting('t.key3'),
+  'C8: a stale sending row (crash between send and mark) is resumed with the same idempotency key');
+select is((current_setting('t.b3')::json -> 0 -> 'payload')::jsonb,
+  jsonb_build_object('from', 'TL <d@example.test>', 'to', 'alice@example.test', 'subject', 'Subj', 'html', '<p>A+B</p>', 'text', 'A+B',
+                     'headers', jsonb_build_object('List-Unsubscribe', '<x>')),
+  'C8: ... WITH its stored payload, unchanged although the content changed (sent verbatim, never re-rendered)');
 select is((select attempts from private.digest_sends where run_id = current_setting('t.run3')::uuid), 2, 'C8: the retry is counted in attempts');
 -- Never resolved that evening: the NEXT DAY's run resumes the old row (its run, key and window), it never mints a new key.
+-- The cap is full (and this stuck row is part of what fills it): a resume needs no room, it was charged when claimed.
 update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run3')::uuid;
+update public.app_settings set digest_daily_cap = 1;
 set local role service_role;
 select set_config('t.run4', public.svc_digest_start('daily', '2026-10-23')::text, true);
 reset role;
@@ -548,15 +579,20 @@ update private.digest_runs set window_to = now() + interval '1 minute' where run
 set local role service_role;
 select set_config('t.b4', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run4')::uuid, 100) b), true);
 reset role;
-select is((select string_agg((e ->> 'run_id') || '|' || (e ->> 'idempotency_key') || '|' || ((e ->> 'window_to')::timestamptz = now())::text, ',')
+select is((select string_agg((e ->> 'run_id') || '|' || (e ->> 'idempotency_key') || '|' || ((e ->> 'window_to')::timestamptz = now() + interval '1 second')::text
+                             || '|' || (e -> 'payload' ->> 'html'), ',')
              from json_array_elements(current_setting('t.b4')::json) e),
-  current_setting('t.run3') || '|' || current_setting('t.key2') || '|true',
-  'C8: a later run resumes the unresolved row with ITS run id, key and window');
+  current_setting('t.run3') || '|' || current_setting('t.key3') || '|true|<p>A+B</p>',
+  'C8: a later run resumes the unresolved row with ITS run id, key, window and payload, even with the cap full');
+select ok(not (select cap_hit from private.digest_runs where run_id = current_setting('t.run4')::uuid), 'a resume alone does not hit the cap');
+update public.app_settings set digest_daily_cap = 500;
 select is((select count(*)::int from private.digest_sends where run_id = current_setting('t.run4')::uuid), 0, 'no new row (no new key) while a send is unresolved');
 set local role service_role;
 select is(public.svc_digest_mark(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), true, 'the resumed row is marked sent on its own run');
 reset role;
-select ok((select last_sent_through = now() from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'last_sent_through advances to the resumed row''s window');
+select ok((select last_sent_through = now() + interval '1 second' from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'last_sent_through advances to the resumed row''s window');
+select ok((select payload is null from private.digest_sends where run_id = current_setting('t.run3')::uuid), 'the stored payload is cleared once the row is sent');
+update public.subscriptions set events = true where user_id = 'f5000000-0000-4000-a000-000000000001';
 -- A fresh unresolved send blocks any new key; a stale one whose window no longer has content is closed (no_content).
 update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000001';
 set local role service_role;
@@ -577,8 +613,8 @@ select is((select status || '|' || error_code from private.digest_sends where ru
 -- The daily cap is one budget across run kinds: today's daily rows count against the weekly run.
 update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000002';
 select set_config('t.used', (select count(*)::text from private.digest_sends d
-                               where (d.status = 'sent' and d.sent_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')
-                                  or (d.status = 'sending' and d.updated_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')), true);
+                               where d.status in ('sent', 'sending')
+                                 and d.created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'), true);
 update public.app_settings set digest_daily_cap = current_setting('t.used')::smallint;
 set local role service_role;
 select set_config('t.run7', public.svc_digest_start('weekly', '2026-10-22')::text, true);

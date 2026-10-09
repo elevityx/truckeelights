@@ -40,6 +40,10 @@ export default function PrivacyPage() {
           <li>Which houses you manage, and any request you send to manage or remove a house, with your note.</li>
           <li>A record of which digests were sent to your account, so we can avoid sending you the same digest twice.</li>
           <li>
+            A copy of a digest email while it is being sent, so a retry after a network error sends exactly the same email instead
+            of a second, different one.
+          </li>
+          <li>
             If you start from a device that already added a house, a one-way hash of your email (not the address itself), usable for
             one hour, so that device’s houses can move to your account once you confirm the email.
           </li>
@@ -65,6 +69,7 @@ export default function PrivacyPage() {
             start again.
           </li>
           <li>The email hash for linking a device’s houses: deleted within a day.</li>
+          <li>The copy of a digest email being sent: deleted as soon as it is sent or fails, and within 2 days at most.</li>
           <li>Records of which digests were sent: 60 days.</li>
           <li>Requests to manage or remove a house: while they are open, then 180 days after they are decided.</li>
         </ul>

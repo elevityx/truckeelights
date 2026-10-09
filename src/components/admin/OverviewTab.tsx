@@ -14,7 +14,8 @@ interface Props {
   onForbidden(): void;
 }
 
-/** Overview: subscriber counts (counts only, no list), today's email use against the provider limit, and the subscribe switch. */
+/** Overview: subscriber counts (counts only, no list), today's digest emails against the app's digest cap
+ * (app_settings.digest_daily_cap; sign-in mail is not counted, provider usage is watched outside the app), and the subscribe switch. */
 export default function OverviewTab({ ctx, onForbidden }: Props) {
   const region = ctx.region.id;
   const slug = ctx.region.slug;
@@ -113,7 +114,7 @@ export default function OverviewTab({ ctx, onForbidden }: Props) {
         </div>
         <div className={`ov-bar ${level === 'ok' ? '' : level}`} aria-hidden="true"><i style={{ width: `${digest ? usagePercent(digest) : 0}%` }} /></div>
         <p className="fine">
-          The digest stops at its daily cap ({digest ? digest.cap : 500}) and sends the rest the next evening. Sign-in emails aren&apos;t counted here.
+          The digest stops at its daily cap ({digest ? digest.cap : 500}) and sends the rest at each person’s next digest run (the next evening for daily, the next Thursday for weekly). Sign-in emails aren&apos;t counted here.
         </p>
       </div>
       <p className="fine">Counts only. There is no subscriber list in admin, by design.</p>

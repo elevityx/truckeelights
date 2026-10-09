@@ -92,7 +92,7 @@ export function usageLevel(d: Pick<DigestToday, 'sent' | 'cap'>): UsageLevel {
 /** The banner copy, or null when nothing needs attention. */
 export function usageBanner(d: DigestToday): string | null {
   if (d.capHit || usageLevel(d) === 'full') {
-    return `The digest reached its daily cap (${d.cap}) and left some people for the next evening. Raise digest_daily_cap to send more.`;
+    return `The digest reached its daily cap (${d.cap}) and left some people for their next digest run (the next evening for daily, the next Thursday for weekly). Raise digest_daily_cap to send more.`;
   }
   if (usageLevel(d) === 'warn') return `Digest emails today are above 80% of the daily cap (${d.cap}).`;
   return null;

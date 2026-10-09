@@ -124,21 +124,43 @@ async function functionErrorCode(e: unknown): Promise<string> {
   return '';
 }
 
+/** One attempt at `delete-account`: the function's error code ('' on success), or 'network' when it was not reached. */
+export type DeleteAttempt = () => Promise<string>;
+
 /**
  * Edge Function `delete-account` (C4): the user comes only from the verified JWT. Returns 'reauth' when the
  * function wants a fresh email code first (no recent `otp` sign-in in the token's `amr`).
- * Contract: 200 `{ ok: true }`; 401 `{ error: 'reauth_required' }`; 403 `{ error: 'forbidden' }` (admins).
+ * Contract: 200 `{ deleted: true }`; 403 `{ error: 'reauth_required' }`; 403 `{ error: 'forbidden' }` (admins);
+ * 503 `{ error: 'retry' }` when the outcome is not known yet. The function is idempotent (a repeat after the Auth user
+ * is gone runs the cleanup and answers 200), so `retry` and a lost response are retried here with the same session,
+ * twice; if still unknown, the caller shows `delete_unconfirmed` and the person can tap again safely.
  */
-export async function deleteMyAccount(): Promise<'ok' | 'reauth'> {
-  try {
-    const { error } = await getSupabase().functions.invoke('delete-account', { method: 'POST', body: {} });
-    if (!error) return 'ok';
-    const code = await functionErrorCode(error);
+export async function deleteAccountWithRetry(
+  attempt: DeleteAttempt,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<'ok' | 'reauth'> {
+  for (let i = 0; ; i++) {
+    const code = await attempt();
+    if (code === '') return 'ok';
     if (code === 'reauth_required' || code === 'fresh_otp_required') return 'reauth';
     if (code === 'forbidden') throw new DataError('forbidden');
     if (code === 'not_signed_in') throw new DataError('not_signed_in');
-    throw new DataError('unknown');
-  } catch (e) {
-    throw e instanceof DataError ? e : toDataError(e);
+    if (code !== 'retry' && code !== 'network' && code !== 'unavailable') throw new DataError('unknown');
+    if (i >= 2) throw new DataError('unknown', 'delete_unconfirmed');
+    await sleep(1000 * (i + 1));
   }
+}
+
+export async function deleteMyAccount(): Promise<'ok' | 'reauth'> {
+  return deleteAccountWithRetry(async () => {
+    try {
+      const { error } = await getSupabase().functions.invoke('delete-account', { method: 'POST', body: {} });
+      if (!error) return '';
+      const code = await functionErrorCode(error);
+      // No JSON body: the request or its response was lost (FunctionsFetchError / relay error), so the outcome is unknown.
+      return code || 'network';
+    } catch {
+      return 'network';
+    }
+  });
 }

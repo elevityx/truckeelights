@@ -122,20 +122,27 @@ create table private.digest_runs (
 );
 
 -- C8: one row per (run, user). error_code only, no provider text.
--- The provider Idempotency-Key is per CONTENT WINDOW, not per run: digest:<public_id>:<window_from, ISO UTC>, where
--- window_from is the subscription's last_sent_through when the row was claimed. It is stored here and reused for every
--- retry of the row: the same run's next cron tick, or a later day's run (svc_digest_batch resumes an unresolved
--- `sending` row with its own key and window before minting anything new). Resend dedupes a key for 24 h; an ambiguous
--- send resumed more than 24 h later can be delivered twice (accepted residual risk, Review_Code_Subscribe).
+-- The provider Idempotency-Key is per CONTENT WINDOW, not per run: digest:<public_id>:<window_from>/<window_to> (ISO UTC),
+-- where window_from is the subscription's last_sent_through when the row was claimed and window_to the claiming run's
+-- window end. It is stored here and reused for every retry of the row: the same run's next cron tick, or a later day's
+-- run (svc_digest_batch resumes an unresolved `sending` row with its own key and window before minting anything new).
+-- A row closed as failed (a DEFINITE refusal) is never reused: the next run claims a new row whose later window_to gives
+-- a new key. Resend dedupes a key for 24 h; an ambiguous send resumed more than 24 h later can be delivered twice
+-- (accepted residual risk, Review_Code_Subscribe).
+-- payload: the exact email (from, to, subject, html, text, headers) rendered when the row was first claimed, stored by
+-- svc_digest_store_payload BEFORE the provider call. A resumed row is sent from it verbatim with the same key, so Resend
+-- sees the identical request whatever changed since (houses, events, preferences, token version). It is cleared as soon
+-- as the row reaches a definite outcome (svc_digest_mark), and the daily sweep clears any left on a row idle 2 days.
 create table private.digest_sends (
   run_id uuid not null references private.digest_runs(run_id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   status text not null check (status in ('sending', 'sent', 'failed')),
   attempts integer not null default 1,
   error_code text check (error_code is null or error_code ~ '^[a-z0-9_]{1,40}$'),
-  idempotency_key text not null check (idempotency_key ~ '^digest:[0-9a-f-]{36}:[0-9T:.Z-]{20,32}$'),
+  idempotency_key text not null check (idempotency_key ~ '^digest:[0-9a-f-]{36}:[0-9T:.Z-]{20,32}/[0-9T:.Z-]{20,32}$'),
   window_from timestamptz not null,
   window_to timestamptz not null,
+  payload jsonb check (payload is null or (jsonb_typeof(payload) = 'object' and octet_length(payload::text) <= 262144)),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   sent_at timestamptz,
@@ -771,46 +778,51 @@ begin
   return v_id;
 end $$;
 
--- Claim up to p_limit (max 100, and never past the daily cap) recipients and return their content, marked `sending`.
+-- Claim up to p_limit (max 100) recipients and return their content, marked `sending`.
 --  * Resume first: a user's unresolved `sending` row from ANY run whose last touch is over 5 minutes old (a crash, an
 --    ambiguous provider outcome, or a worker that ran out of time) is handed out again with ITS run id, ITS stored
---    idempotency key and ITS window, so the payload and the key are identical and Resend dedupes it (24 h window).
---    While such a row exists the user gets nothing new. A resumed row whose window no longer has content is closed as
---    failed (no_content) instead.
+--    idempotency key, ITS window and ITS stored payload (null when the crash came before svc_digest_store_payload, in
+--    which case Resend never saw the key and a fresh render is safe). The caller sends a stored payload verbatim.
+--    While such a row exists the user gets nothing new. A resumed row with no stored payload whose window no longer
+--    has content is closed as failed (no_content) instead.
 --  * Then new rows for this run's kind: no row yet in this run, something new in (last_sent_through, window_to]. The
---    key is digest:<public_id>:<last_sent_through ISO>, stored on the row.
---  * Cap: one advisory lock per UTC day serializes the read-count-claim across daily and weekly batches.
+--    key is digest:<public_id>:<last_sent_through ISO>/<run window_to ISO>, stored on the row.
+--  * Cap (app_settings.digest_daily_cap): a row is charged ONCE, to the UTC day it was first claimed: today's cap use
+--    is the rows created today that are `sent` or still `sending` (a definite failure frees its slot). Resuming a row
+--    never needs room (it was charged when claimed), so rows stuck `sending` are drained even when they are what
+--    filled the cap. Only new claims are limited, and one advisory lock per UTC day serializes the
+--    read-count-claim across daily and weekly batches.
 create function public.svc_digest_batch(p_run_id uuid, p_limit integer)
 returns table (run_id uuid, user_id uuid, email text, idempotency_key text, window_to timestamptz,
                public_id uuid, token_version integer,
                region_slug text, region_name text, timezone text, cadence text,
-               houses jsonb, house_total integer, events jsonb, event_total integer)
+               houses jsonb, house_total integer, events jsonb, event_total integer, payload jsonb)
 language plpgsql security definer set search_path = '' as $$
 #variable_conflict use_column
 declare
   v_run private.digest_runs%rowtype;
   v_day timestamptz := date_trunc('day', now() at time zone 'UTC') at time zone 'UTC';
-  v_room integer; v_n integer := 0; c record; v_key text;
+  v_limit integer := greatest(0, least(coalesce(p_limit, 100), 100));
+  v_room integer; v_n integer := 0; v_new integer := 0; c record; v_key text;
 begin
   select * into v_run from private.digest_runs r where r.run_id = p_run_id for update;
   if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
   perform pg_advisory_xact_lock(hashtextextended('digest_cap:' || to_char(v_day at time zone 'UTC', 'YYYY-MM-DD'), 0));
-  select greatest(0, least(coalesce(p_limit, 100), 100,
-           a.digest_daily_cap - (select count(*) from private.digest_sends d
-                                  where (d.status = 'sent' and d.sent_at >= v_day)
-                                     or (d.status = 'sending' and d.updated_at >= v_day))))::integer
+  select greatest(0, a.digest_daily_cap - (select count(*) from private.digest_sends d
+                                            where d.created_at >= v_day and d.status in ('sent', 'sending')))::integer
     into v_room from public.app_settings a;
   for c in
     select s.user_id, u.email::text as email, s.public_id, s.token_version, r.slug, r.name, r.timezone, s.cadence,
            coalesce(s.last_sent_through, s.confirmed_at) as w_from,
-           p.run_id as p_run, p.idempotency_key as p_key, coalesce(p.window_to, v_run.window_to) as w_to,
+           p.run_id as p_run, p.idempotency_key as p_key, p.payload as p_payload,
+           coalesce(p.window_to, v_run.window_to) as w_to,
            hs.items as h_items, hs.total as h_total, ev.items as e_items, ev.total as e_total
       from public.subscriptions s
       join auth.users u on u.id = s.user_id
       join public.regions r on r.id = s.region_id
       join public.site_settings ss on ss.region_id = s.region_id
       left join lateral (
-        select d.run_id, d.idempotency_key, d.window_to, d.updated_at from private.digest_sends d
+        select d.run_id, d.idempotency_key, d.window_to, d.updated_at, d.payload from private.digest_sends d
          where d.user_id = s.user_id and d.status = 'sending'
          order by d.created_at limit 1
       ) p on true
@@ -832,7 +844,7 @@ begin
                  where s.events and e.region_id = s.region_id and e.season = ss.active_season and e.year = ss.active_year
                    and e.status = 'approved' and e.approved_at > s.last_sent_through
                    and e.approved_at <= coalesce(p.window_to, v_run.window_to)
-                   -- "still upcoming" is judged at the window's end, not now(), so a resumed send renders the same email
+                   -- "still upcoming" is judged at the window's end, not now()
                    and coalesce(e.ends_at, e.starts_at + interval '3 hours') > coalesce(p.window_to, v_run.window_to)) x
       ) ev
      where s.status = 'active' and r.is_active
@@ -845,26 +857,31 @@ begin
      order by (p.run_id is null), s.last_sent_through, s.user_id
      for update of s skip locked
   loop
-    if c.p_run is not null and c.h_total = 0 and c.e_total = 0 then
-      update private.digest_sends d set status = 'failed', error_code = 'no_content', updated_at = now()
-       where d.run_id = c.p_run and d.user_id = c.user_id and d.status = 'sending';
-      update private.digest_runs r set failed = r.failed + 1 where r.run_id = c.p_run;
-      continue;
-    end if;
-    if v_n >= v_room then
-      update private.digest_runs r set cap_hit = true where r.run_id = p_run_id;
-      exit;
-    end if;
+    if v_n >= v_limit then exit; end if;
     if c.p_run is not null then
+      if c.p_payload is null and c.h_total = 0 and c.e_total = 0 then
+        -- never stored, so never sent: nothing to resume
+        update private.digest_sends d set status = 'failed', error_code = 'no_content', updated_at = now()
+         where d.run_id = c.p_run and d.user_id = c.user_id and d.status = 'sending';
+        update private.digest_runs r set failed = r.failed + 1 where r.run_id = c.p_run;
+        continue;
+      end if;
+      -- a resume: charged to its claim day already, so it needs no room
       update private.digest_sends d set attempts = d.attempts + 1, updated_at = now()
        where d.run_id = c.p_run and d.user_id = c.user_id and d.status = 'sending';
-      run_id := c.p_run; idempotency_key := c.p_key;
+      run_id := c.p_run; idempotency_key := c.p_key; payload := c.p_payload;
     else
+      if v_new >= v_room then
+        update private.digest_runs r set cap_hit = true where r.run_id = p_run_id;
+        exit;                                         -- resumes are ordered first, so only new claims remain
+      end if;
       v_key := 'digest:' || c.public_id::text || ':'
-               || to_char(c.w_from at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+               || to_char(c.w_from at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '/'
+               || to_char(v_run.window_to at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
       insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to)
       values (p_run_id, c.user_id, 'sending', v_key, c.w_from, v_run.window_to);
-      run_id := p_run_id; idempotency_key := v_key;
+      run_id := p_run_id; idempotency_key := v_key; payload := null;
+      v_new := v_new + 1;
     end if;
     v_n := v_n + 1;
     user_id := c.user_id; email := c.email; window_to := c.w_to;
@@ -875,10 +892,37 @@ begin
   end loop;
 end $$;
 
+-- Store the rendered email on a `sending` row, BEFORE the provider call. Stored once: the same payload again returns
+-- 'same' (a retry of this call), a different one raises payload_conflict and nothing changes (the caller must then
+-- not send). 'stored' on the first store. No `sending` row -> not_found.
+create function public.svc_digest_store_payload(p_run_id uuid, p_user_id uuid, p_subject text, p_html text,
+                                                p_text text, p_from text, p_to text, p_headers jsonb) returns text
+language plpgsql security definer set search_path = '' as $$
+declare v_old jsonb; v_new jsonb;
+begin
+  if p_subject is null or p_html is null or p_text is null or p_from is null or p_to is null then
+    raise exception 'invalid_input' using errcode = '22023', detail = 'payload'; end if;
+  if p_headers is not null and jsonb_typeof(p_headers) <> 'object' then
+    raise exception 'invalid_input' using errcode = '22023', detail = 'headers'; end if;
+  v_new := jsonb_build_object('from', p_from, 'to', p_to, 'subject', p_subject, 'html', p_html, 'text', p_text,
+                              'headers', coalesce(p_headers, '{}'::jsonb));
+  select d.payload into v_old from private.digest_sends d
+   where d.run_id = p_run_id and d.user_id = p_user_id and d.status = 'sending' for update;
+  if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
+  if v_old is not null then
+    if v_old = v_new then return 'same'; end if;
+    raise exception 'payload_conflict' using errcode = '23505';
+  end if;
+  update private.digest_sends d set payload = v_new, updated_at = now()
+   where d.run_id = p_run_id and d.user_id = p_user_id and d.status = 'sending';
+  return 'stored';
+end $$;
+
 -- After a DEFINITE provider outcome. ok -> 'sent' and last_sent_through advances to the row's window; else 'failed'
--- with a short code. An ambiguous outcome (timeout, network error, 5xx) is never marked: the row stays `sending` and is
--- resumed with the same key. Only a 'sending' row changes, so a repeated mark is a no-op (returns false). p_run_id is
--- the row's run (svc_digest_batch returns it; a resumed row can belong to an earlier run).
+-- with a short code. Either way the stored payload is cleared (no rendered email is kept once it is settled). An
+-- ambiguous outcome (timeout, network error, 5xx) is never marked: the row stays `sending` and is resumed with the
+-- same key and payload. Only a 'sending' row changes, so a repeated mark is a no-op (returns false). p_run_id is the
+-- row's run (svc_digest_batch returns it; a resumed row can belong to an earlier run).
 create function public.svc_digest_mark(p_run_id uuid, p_user_id uuid, p_ok boolean, p_error_code text) returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare v_to timestamptz;
@@ -889,6 +933,7 @@ begin
      set status = case when p_ok then 'sent' else 'failed' end,
          sent_at = case when p_ok then now() end,
          error_code = case when p_ok then null else v_code end,
+         payload = null,
          updated_at = now()
    where run_id = p_run_id and user_id = p_user_id and status = 'sending'
   returning window_to into v_to;
@@ -984,11 +1029,14 @@ begin
   return v_n;
 end $$;
 
--- Retention: links after a day, digest bookkeeping after 60 days, resolved claims after 180 days.
+-- Retention: links after a day, a stored digest payload once its row is settled (svc_digest_mark) or idle 2 days,
+-- digest bookkeeping after 60 days, resolved claims after 180 days.
 create function private.sweep_subscribe() returns integer
 language plpgsql security definer set search_path = '' as $$
 declare v_n integer; v_t integer := 0;
 begin
+  update private.digest_sends set payload = null where payload is not null and updated_at < now() - interval '2 days';
+  get diagnostics v_n = row_count; v_t := v_t + v_n;
   delete from private.house_links where created_at < now() - interval '1 day';
   get diagnostics v_n = row_count; v_t := v_t + v_n;
   delete from private.digest_runs where started_at < now() - interval '60 days';
@@ -1084,6 +1132,7 @@ grant execute on function public.admin_set_subscribe_open(uuid, boolean) to auth
 grant execute on function public.svc_digest_start(text, date) to service_role;
 grant execute on function public.svc_digest_batch(uuid, integer) to service_role;
 grant execute on function public.svc_digest_mark(uuid, uuid, boolean, text) to service_role;
+grant execute on function public.svc_digest_store_payload(uuid, uuid, text, text, text, text, text, jsonb) to service_role;
 grant execute on function public.svc_digest_finish(uuid) to service_role;
 grant execute on function public.svc_unsubscribe_lookup(uuid, integer) to service_role;
 grant execute on function public.svc_unsubscribe_stop(uuid, integer) to service_role;

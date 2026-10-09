@@ -24,13 +24,13 @@ const P = '11111111-2222-4333-8444-555555555555';
 Deno.test('digest: svc_digest_start / batch / mark / finish signatures and shapes', async () => {
   const { sb, calls } = fakeClient({
     svc_digest_start: { data: RUN, error: null },
-    svc_digest_batch: { data: [{ run_id: RUN, user_id: U, idempotency_key: `digest:${P}:2026-12-04T02:07:00.000000Z`, window_to: '2026-12-05T02:07:00Z' }], error: null },
+    svc_digest_batch: { data: [{ run_id: RUN, user_id: U, idempotency_key: `digest:${P}:2026-12-04T02:07:00.000000Z/2026-12-05T02:07:00.000000Z`, window_to: '2026-12-05T02:07:00Z' }], error: null },
     svc_digest_mark: { data: true, error: null },
     svc_digest_finish: { data: [{ sent: 1, failed: 0, cap_hit: true }], error: null },
   });
   const db = digestDb(sb);
   assertEquals(await db.start('daily', '2026-12-04'), RUN);
-  assertEquals((await db.batch(RUN, 100))[0].idempotency_key, `digest:${P}:2026-12-04T02:07:00.000000Z`);
+  assertEquals((await db.batch(RUN, 100))[0].idempotency_key, `digest:${P}:2026-12-04T02:07:00.000000Z/2026-12-05T02:07:00.000000Z`);
   assertEquals(await db.mark(RUN, U, false, 'http_500'), true);
   assertEquals(await db.finish(RUN), { sent: 1, failed: 0, cap_hit: true });
   assertEquals(calls, [
@@ -39,6 +39,21 @@ Deno.test('digest: svc_digest_start / batch / mark / finish signatures and shape
     ['svc_digest_mark', { p_run_id: RUN, p_user_id: U, p_ok: false, p_error_code: 'http_500' }],
     ['svc_digest_finish', { p_run_id: RUN }],
   ]);
+});
+
+Deno.test('digest: svc_digest_store_payload takes the row and the exact email; a conflict throws', async () => {
+  const p = { from: 'F <f@x.test>', to: 'a@x.test', subject: 'S', html: '<p>h</p>', text: 't', headers: { 'List-Unsubscribe': '<u>' } };
+  const { sb, calls } = fakeClient({ svc_digest_store_payload: { data: 'stored', error: null } });
+  await digestDb(sb).storePayload(RUN, U, p);
+  assertEquals(calls, [['svc_digest_store_payload', {
+    p_run_id: RUN, p_user_id: U, p_subject: 'S', p_html: '<p>h</p>', p_text: 't', p_from: 'F <f@x.test>', p_to: 'a@x.test',
+    p_headers: { 'List-Unsubscribe': '<u>' },
+  }]]);
+  const same = fakeClient({ svc_digest_store_payload: { data: 'same', error: null } });
+  await digestDb(same.sb).storePayload(RUN, U, p);
+  const conflict = fakeClient({ svc_digest_store_payload: { data: null, error: { code: '23505', message: 'payload_conflict' } } });
+  const e = await assertRejects(() => digestDb(conflict.sb).storePayload(RUN, U, p));
+  assertEquals((e as Error).message, 'rpc svc_digest_store_payload failed');
 });
 
 Deno.test('digest: a null start or an rpc error throws without the provider message', async () => {

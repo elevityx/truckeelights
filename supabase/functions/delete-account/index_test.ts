@@ -71,24 +71,83 @@ Deno.test('admins are refused before anything changes: no auth delete, no cleanu
   assertEquals(calls.order, ['check']);
 });
 
-Deno.test('auth delete fails: 502 and NOTHING changed (no cleanup ran)', async () => {
-  const failing = deps({ deleteAuthUser: () => Promise.resolve(false) });
-  assertEquals((await handle(req(jwt(fresh)), failing.d)).status, 502);
-  assertEquals(failing.calls.cleaned.length, 0);
-  const throwing = deps({ deleteAuthUser: () => Promise.reject(new Error('timeout')) });
-  assertEquals((await handle(req(jwt(fresh)), throwing.d)).status, 502);
-  assertEquals(throwing.calls.cleaned.length, 0);
+/** A stateful Auth + database: deleteAuthUser really removes the user, and the database check sees it. */
+function liveDeps(deleteBehaviour: 'commit_then_throw' | 'refuse' | 'throw_no_commit', checkFailsAfterDelete = false) {
+  const state = { exists: true, cleaned: 0, deletes: 0 };
+  let checks = 0;
+  const d: DeleteDeps = {
+    site: 'https://example.test', now: () => NOW,
+    // Auth's getUser: a valid token for a deleted user is user_not_found, mapped to { gone: true }.
+    verify: () => Promise.resolve(state.exists ? { id: 'user-1' } : { id: 'user-1', gone: true }),
+    db: {
+      checkDelete: () => {
+        checks++;
+        if (checkFailsAfterDelete && checks > 1) return Promise.reject(new Error('db down'));
+        return Promise.resolve(state.exists ? 'ok' : 'gone');
+      },
+      cleanupDeleted: () => { state.cleaned++; return Promise.resolve(); },
+    },
+    deleteAuthUser: () => {
+      state.deletes++;
+      if (deleteBehaviour === 'commit_then_throw') { state.exists = false; return Promise.reject(new Error('response lost')); }
+      if (deleteBehaviour === 'refuse') return Promise.resolve(false);
+      return Promise.reject(new Error('timeout'));
+    },
+  };
+  return { d, state };
+}
+
+Deno.test('auth delete COMMITTED but its response was lost: the re-check sees the user gone, cleans up, 200', async () => {
+  const { d, state } = liveDeps('commit_then_throw');
+  const r = await handle(req(jwt(fresh)), d);
+  assertEquals([r.status, await r.json()], [200, { deleted: true }]);
+  assertEquals([state.exists, state.cleaned], [false, 1]);
 });
 
-Deno.test('a retry after the auth user is already gone just runs the idempotent cleanup', async () => {
-  const { d, calls } = deps({}, 'gone');
+Deno.test('auth delete refused or timed out while the user still exists: 503 retry, nothing cleaned; the retry works', async () => {
+  for (const b of ['refuse', 'throw_no_commit'] as const) {
+    const { d, state } = liveDeps(b);
+    const r = await handle(req(jwt(fresh)), d);
+    assertEquals([r.status, (await r.json()).error], [503, 'retry']);
+    assertEquals([state.exists, state.cleaned], [true, 0]);
+    d.deleteAuthUser = () => { state.exists = false; return Promise.resolve(true); };
+    assertEquals((await handle(req(jwt(fresh)), d)).status, 200);
+    assertEquals(state.cleaned, 1);
+  }
+});
+
+Deno.test('ambiguous delete AND the re-check fails: 503 retry (never "nothing changed"); the retry with the same token is 200', async () => {
+  const { d, state } = liveDeps('commit_then_throw', true);
+  const r = await handle(req(jwt(fresh)), d);
+  assertEquals([r.status, (await r.json()).error], [503, 'retry']);
+  assertEquals(state.cleaned, 0);
+  // The retry: Auth answers user_not_found for the (valid) token, the database says gone -> cleanup, 200.
+  const { d: d2 } = liveDeps('commit_then_throw');
+  d2.verify = () => Promise.resolve({ id: 'user-1', gone: true });
+  d2.db.checkDelete = () => Promise.resolve('gone');
+  let cleaned = 0;
+  d2.db.cleanupDeleted = () => { cleaned++; return Promise.resolve(); };
+  d2.deleteAuthUser = () => Promise.reject(new Error('must not delete again'));
+  assertEquals((await handle(req(jwt(fresh)), d2)).status, 200);
+  assertEquals(cleaned, 1);
+});
+
+Deno.test('a retry after the auth user is already gone just runs the idempotent cleanup, even past the 10-minute window', async () => {
+  const { d, calls } = deps({ verify: () => Promise.resolve({ id: 'user-1', gone: true }) }, 'gone');
   assertEquals((await handle(req(jwt(fresh)), d)).status, 200);
   assertEquals(calls.order, ['check', 'cleanup']);
+  const stale = { is_anonymous: false, amr: [{ method: 'otp', timestamp: nowS - 3600 }] };
+  const late = deps({ verify: () => Promise.resolve({ id: 'user-1', gone: true }) }, 'gone');
+  assertEquals((await handle(req(jwt(stale)), late.d)).status, 200);
+  // Auth says gone but the database still has the user: fail closed, nothing runs.
+  const odd = deps({ verify: () => Promise.resolve({ id: 'user-1', gone: true }) }, 'ok');
+  assertEquals((await handle(req(jwt(fresh)), odd.d)).status, 401);
+  assertEquals(odd.calls.order, ['check']);
 });
 
-Deno.test('a failing check is 502 (nothing changed); a failing cleanup after the auth delete still reports deleted', async () => {
+Deno.test('a failing check is 503 retry (nothing changed); a failing cleanup after the auth delete still reports deleted', async () => {
   const { d: d1, calls: c1 } = deps({ db: { checkDelete: () => Promise.reject(new Error('x')), cleanupDeleted: () => Promise.resolve() } });
-  assertEquals((await handle(req(jwt(fresh)), d1)).status, 502);
+  assertEquals((await handle(req(jwt(fresh)), d1)).status, 503);
   assertEquals(c1.authDeleted.length, 0);
   const { d: d2, calls: c2 } = deps({ db: { checkDelete: () => Promise.resolve('ok'), cleanupDeleted: () => Promise.reject(new Error('x')) } });
   assertEquals((await handle(req(jwt(fresh)), d2)).status, 200);

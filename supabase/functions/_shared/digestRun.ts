@@ -1,16 +1,19 @@
 // The send loop for one run kind (C8), bounded per invocation. The database owns the ledger, the keys and the cap:
 //   svc_digest_start   -> the run for (kind, Pacific date); every cron tick that evening resumes the same run
-//   svc_digest_batch   -> resumes unresolved `sending` rows (any run, idle 5 min) with their stored key and window, then
-//                         claims new recipients as `sending` with key digest:<public_id>:<window start>; stops at
-//                         app_settings.digest_daily_cap
+//   svc_digest_batch   -> resumes unresolved `sending` rows (any run, idle 5 min) with their stored key, window and
+//                         payload, then claims new recipients as `sending` with key
+//                         digest:<public_id>:<window start>/<window end>; new claims stop at app_settings.digest_daily_cap
+//   svc_digest_store_payload -> a row with no stored payload is rendered once and the exact email stored BEFORE the
+//                         provider call; a row with one is sent from it verbatim (never re-rendered), so a resumed
+//                         send repeats the identical request under the same key and Resend dedupes it
 //   (Resend, with Idempotency-Key = the row's stored key)
 //   svc_digest_mark    -> a DEFINITE outcome only: 2xx -> `sent`, advancing last_sent_through; 4xx -> `failed`
-//                         (the window is not advanced, so the next run picks the items up again). An ambiguous outcome
+//                         (the window is not advanced, so the next run picks the items up again under a new key). An ambiguous outcome
 //                         (timeout, network error, 5xx) is left `sending` and resumed later with the same key.
 //   svc_digest_finish  -> totals and cap_hit
 // Each invocation stops claiming and sending at its deadline (~40 s) or after MAX_SENDS, and reports `more`; rows it
 // claimed but did not send stay `sending` and the next 10-minute tick resumes them. Logs only counts and ids.
-import type { Cadence, DigestDb, DigestRecipient } from './db.ts';
+import type { Cadence, DigestDb, DigestRecipient, StoredPayload } from './db.ts';
 import { renderDigest } from './digestEmail.ts';
 import { sendEmail, type OutgoingEmail, type SendResult, type Sleep } from './resend.ts';
 import { signToken, PREFS_TTL_SECONDS } from './token.ts';
@@ -85,6 +88,20 @@ export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<Ou
   };
 }
 
+/**
+ * The request body for a stored payload, in one fixed key order (headers sorted by name), so the fresh send and every
+ * resume of it serialize to the same bytes whatever order the database returns the jsonb keys in.
+ */
+export function outgoingFrom(p: StoredPayload): OutgoingEmail {
+  const headers: Record<string, string> = {};
+  for (const k of Object.keys(p.headers ?? {}).sort()) headers[k] = String(p.headers[k]);
+  return { from: p.from, to: p.to, subject: p.subject, html: p.html, text: p.text, headers };
+}
+
+export function payloadOf(e: OutgoingEmail): StoredPayload {
+  return { from: e.from, to: e.to, subject: e.subject, html: e.html, text: e.text, headers: { ...(e.headers ?? {}) } };
+}
+
 export async function runDigest(
   kind: Cadence, runDate: string, cfg: RunConfig, deps: RunDeps,
   budget: Budget = { deadline: cfg.now().getTime() + BUDGET_MS, sendsLeft: MAX_SENDS },
@@ -106,13 +123,28 @@ export async function runDigest(
       // Claimed rows not reached before the deadline stay `sending`; the next tick resumes them (same key).
       if (outOfBudget()) { summary.more = true; break outer; }
       seen.add(`${r.run_id}:${r.user_id}`);
-      const email = await buildEmail(r, cfg);
-      if (!email) {
-        // The SQL returns only people with something new, so this means malformed content. Release the claim as a
-        // failure (the window stays put; the next run tries again) rather than leaving it `sending`.
-        await deps.db.mark(r.run_id, r.user_id, false, 'empty_render');
-        summary.skipped++;
-        continue;
+      let email: OutgoingEmail;
+      if (r.payload) {
+        // A resume of a row whose email was already stored: send exactly that, never a fresh render.
+        email = outgoingFrom(r.payload);
+      } else {
+        const built = await buildEmail(r, cfg);
+        if (!built) {
+          // The SQL returns only people with something new, so this means malformed content. Release the claim as a
+          // failure (the window stays put; the next run tries again) rather than leaving it `sending`.
+          await deps.db.mark(r.run_id, r.user_id, false, 'empty_render');
+          summary.skipped++;
+          continue;
+        }
+        email = outgoingFrom(payloadOf(built));
+        try {
+          await deps.db.storePayload(r.run_id, r.user_id, payloadOf(email));
+        } catch {
+          // Not stored, so not sent: the row stays `sending` and is resumed (it may already hold a payload, which the
+          // resume then sends verbatim). Never call Resend with a payload the row does not hold.
+          summary.pending++;
+          continue;
+        }
       }
       budget.sendsLeft--;
       const res = await send(r.idempotency_key, email);
