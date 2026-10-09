@@ -1,3 +1,4 @@
+import { checkEventUrl } from '@/lib/data/eventUrl';
 import type { PublicEvent, Season } from '@/lib/data/types';
 import { mapShareUrl, type ShareData } from '@/lib/share/urls';
 import { DEFAULT_LENGTH_MS } from '@/lib/time/pacific';
@@ -55,8 +56,8 @@ export function eventShareData(season: Season, base: string | undefined, e: Pick
 export function safeWebsite(url: string | null): string | null {
   if (!url) return null;
   try {
-    const u = new URL(url);
-    return u.protocol === 'https:' ? u.toString() : null;
+    if (!checkEventUrl(url).ok) return null; // the same rules as the database (shorteners, IPs, ports, userinfo)
+    return new URL(url).toString();
   } catch {
     return null;
   }

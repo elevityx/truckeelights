@@ -3,6 +3,24 @@
 -- through a security definer RPC with search_path = '', exact EXECUTE allowlist.
 -- Applies after 20261012000100_house_votes: get_region_context keeps votes_open, and the EXECUTE block keeps the
 -- votes grants (01_acl.test.sql asserts the exact allowlist).
+--
+-- LOCK ORDER for submit_event (Spec_Events Amendment 2). Acquire in this order, never the reverse:
+--   L1 advisory event:uid:<uid>, L2 advisory event:region:<region>   (private.lock_quota; re-entrant in take_quota)
+--   L3 site_settings row of the region, FOR SHARE                    (conflicts with the UPDATE in admin_set_events_open
+--                                                                      and admin_set_season, so a closed switch or a
+--                                                                      season switch is never read stale)
+--   L4 events rows (insert / unique index), private.quota_events insert
+-- Only after L3 does submit_event read events_open and capture the active season/year.
+-- Deadlock check against the other writers of site_settings:
+--   admin_set_season:      site_settings FOR UPDATE, then houses / photos advisory + row locks (rotate_house_photos),
+--                          storage_jobs. It takes no event:* advisory lock and touches no events row.
+--   admin_set_events_open: a single UPDATE of the site_settings row; no other lock.
+--   vote_house:            site_settings FOR KEY SHARE first (compatible with FOR SHARE), then vote:* advisory and
+--                          house rows. It takes no event:* advisory lock and touches no events row.
+--   admin_create_event:    reads site_settings without a lock, then inserts an events row.
+-- submit_event takes no house, photo or vote lock, and the others take no event lock after site_settings, so the
+-- wait-for graph has no cycle. A submit waiting on a FOR UPDATE holder holds only L1/L2, which nothing else wants
+-- while it holds site_settings.
 
 create type public.event_status as enum ('pending', 'approved', 'rejected', 'hidden');
 
@@ -70,11 +88,15 @@ language sql immutable set search_path = '' as $$
   select btrim(regexp_replace(regexp_replace(lower(coalesce(p, '')), '[^a-z0-9 ]', '', 'g'), ' +', ' ', 'g'))
 $$;
 
--- Whole-word match against private.blocked_terms on a lowercased, punctuation-free copy.
+-- Whole-word match against private.blocked_terms, tried on two copies of the text: punctuation turned into spaces
+-- ("fuck-you" -> two words) and punctuation deleted, which is what normalize_event_title stores ("f.u.c.k",
+-- "fu<zero-width space>ck" -> fuck). Either copy matching rejects the text.
 create function private.has_blocked_term(p text) returns boolean
 language sql stable set search_path = '' as $$
   select exists (select 1 from private.blocked_terms t
-                  where regexp_replace(lower(coalesce(p, '')), '[^a-z0-9]+', ' ', 'g') ~ ('\m' || t.term || '\M'))
+                  where regexp_replace(lower(coalesce(p, '')), '[^a-z0-9]+', ' ', 'g') ~ ('\m' || t.term || '\M')
+                     or btrim(regexp_replace(regexp_replace(lower(coalesce(p, '')), '[^a-z0-9 ]', '', 'g'), ' +', ' ', 'g'))
+                        ~ ('\m' || t.term || '\M'))
 $$;
 
 -- A3: the region bbox + 0.05 deg on every side, east edge + 0.10 deg (Sand Harbor, Incline; not Reno).
@@ -254,7 +276,8 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- visitor RPC
--- Same order as submit_house: session, region, switch, fields, bounds, locks, dedupe, stock cap, quota, insert.
+-- Order: session, region, event locks (L1/L2), site_settings FOR SHARE (L3), switch + active pair, fields, bounds,
+-- dedupe, region-wide stock cap, then quota + insert in one subtransaction. See the lock order in the file header.
 create function public.submit_event(p_region_slug text, p_title text, p_description text, p_venue text,
                                     p_address text, p_place_id text, p_lat double precision, p_lng double precision,
                                     p_starts_at timestamptz, p_ends_at timestamptz, p_url text, p_adults_only boolean)
@@ -275,14 +298,16 @@ begin
   if v_uid is null then raise exception 'not_signed_in' using errcode = '28000'; end if;
   select * into v_region from public.regions where slug = p_region_slug and is_active;
   if not found then raise exception 'region_not_found' using errcode = 'P0002'; end if;
-  select * into v_set from public.site_settings where region_id = v_region.id;
+  -- L1/L2: every submit in a region serializes here, so the dedupe and cap reads are exact.
+  perform private.lock_quota('event', v_region.id);
+  -- L3: held until commit. admin_set_events_open / admin_set_season block on it (and vice versa), so the switch and
+  -- the active season/year read here are the ones the insert commits under.
+  select * into v_set from public.site_settings where region_id = v_region.id for share;
   if not found or not v_set.events_open then raise exception 'submissions_closed' using errcode = 'P0001'; end if;
   select * into c from private.clean_event(v_region.id, p_title, p_description, p_venue, p_address, p_place_id,
                                            p_lat, p_lng, p_starts_at, p_ends_at, p_url, p_adults_only, false);
   v_norm := private.normalize_event_title(c.title);
 
-  -- uid -> region locks first: every submit in a region serializes, so the dedupe and cap reads are exact.
-  perform private.lock_quota('event', v_region.id);
   select e.id, e.status into v_hit_id, v_hit_status from public.events e
    where e.region_id = v_region.id and e.season = v_set.active_season and e.year = v_set.active_year
      and e.normalized_title = v_norm and e.starts_at = p_starts_at and e.status <> 'rejected'
@@ -291,21 +316,22 @@ begin
     return query select 'exists'::text, case when v_hit_status = 'approved' then v_hit_id end;
     return;
   end if;
-  -- A5: pending stock cap (active pair, so a season switch cannot strand it), checked under the region lock.
-  select count(*) into v_n from public.events e
-   where e.region_id = v_region.id and e.season = v_set.active_season and e.year = v_set.active_year
-     and e.status = 'pending';
+  -- A5 / Amendment 2: pending stock cap counts every pending row in the region, whatever its season or year, so a
+  -- season switch cannot reset it. Checked under the region lock.
+  select count(*) into v_n from public.events e where e.region_id = v_region.id and e.status = 'pending';
   if v_n >= 40 then raise exception 'queue_full' using errcode = 'P0001'; end if;
 
-  perform private.take_quota('event', v_region.id, null);
-
   begin
+    -- Quota inside the same subtransaction as the insert: a caught 23505 (an admin create won the race) rolls the
+    -- ledger row back too, so "exists" never costs the visitor a submission. The advisory locks stay held (L1/L2
+    -- were taken before the subtransaction started).
+    perform private.take_quota('event', v_region.id, null);
     insert into public.events (region_id, season, year, title, description, venue, address, place_id, lat, lng,
                                starts_at, ends_at, url, adults_only, created_by)
     values (v_region.id, v_set.active_season, v_set.active_year, c.title, c.description, c.venue, c.address,
             c.place_id, p_lat, p_lng, p_starts_at, p_ends_at, c.url, p_adults_only, v_uid)
     returning id into v_id;
-  exception when unique_violation then                      -- backstop; unreachable under the region lock
+  exception when unique_violation then                      -- only an admin write can win this race
     select e.id, e.status into v_hit_id, v_hit_status from public.events e
      where e.region_id = v_region.id and e.season = v_set.active_season and e.year = v_set.active_year
        and e.normalized_title = v_norm and e.starts_at = p_starts_at and e.status <> 'rejected'
@@ -321,7 +347,7 @@ create function public.admin_event_queue(p_region_id uuid, p_status text)
 returns table (id uuid, title text, description text, venue text, address text, lat double precision,
                lng double precision, starts_at timestamptz, ends_at timestamptz, url text, adults_only boolean,
                status text, source text, source_url text, reject_reason text, created_at timestamptz,
-               same_day_warning boolean)
+               same_day_warning boolean, season text, year integer)
 language plpgsql stable security definer set search_path = '' as $$
 #variable_conflict use_column
 begin
@@ -335,11 +361,13 @@ begin
            exists (select 1 from public.events o
                     where o.id <> e.id and o.region_id = e.region_id and o.season = e.season and o.year = e.year
                       and o.normalized_title = e.normalized_title and o.start_day = e.start_day
-                      and o.status <> 'rejected')
+                      and o.status <> 'rejected'),
+           e.season::text, e.year::integer
       from public.events e
       join public.site_settings s on s.region_id = e.region_id
-     where e.region_id = p_region_id and e.season = s.active_season and e.year = s.active_year
-       and e.status = p_status::public.event_status
+     -- Amendment 2: pending rows of every season/year (the cap counts them all); other statuses: the active pair.
+     where e.region_id = p_region_id and e.status = p_status::public.event_status
+       and (p_status = 'pending' or (e.season = s.active_season and e.year = s.active_year))
      order by (e.status = 'pending') desc, e.created_at, e.id
      limit 500;
 end $$;
@@ -351,9 +379,7 @@ begin
   if not private.is_admin(p_region_id) then raise exception 'forbidden' using errcode = '42501'; end if;
   return query
     select count(*)::integer from public.events e
-      join public.site_settings s on s.region_id = e.region_id
-     where e.region_id = p_region_id and e.season = s.active_season and e.year = s.active_year
-       and e.status = 'pending';
+     where e.region_id = p_region_id and e.status = 'pending';      -- every season/year (Amendment 2)
 end $$;
 
 -- Transitions: pending -> approved|rejected, approved -> hidden, hidden -> approved, rejected -> approved.

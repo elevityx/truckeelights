@@ -35,6 +35,7 @@ import type { PickedPlace } from '@/lib/maps/types';
 import { mapShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { applySeason } from '@/lib/theme/applySeason';
 import { notEnded } from '@/lib/time/pacific';
+import { useClock } from '@/lib/time/useClock';
 
 const localStore = () => window.localStorage; // may throw; layer.ts catches
 
@@ -46,7 +47,7 @@ export default function HomePage() {
   const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | null>(null);
   const [layer, setLayer] = useState<Layer>('houses');
   const [events, setEvents] = useState<PublicEvent[]>([]);
-  const [eventsNow, setEventsNow] = useState(0); // when events were loaded: the list groups and filters against it
+  const eventsNow = useClock(); // advances ~every minute and on visibilitychange: grouping and expiry stay current
   const [eventId, setEventId] = useState<string | null>(null);
   const [photosKey, setPhotosKey] = useState(0);
   const [addAt, setAddAt] = useState<{ place: PickedPlace; n: number } | null>(null); // map tap -> Add sheet at the pin step
@@ -95,11 +96,9 @@ export default function HomePage() {
           }
         }
         if (cancelled) return;
-        const loadedAt = Date.now();
         setCtx(c);
         setPins(p);
         setEvents(evs);
-        setEventsNow(loadedAt);
         const q = new URLSearchParams(window.location.search);
         if (q.get('view') === 'list') setView('list');
         const startLayer = c.events ? readLayer(window.location.search, localStore) : 'houses';
@@ -108,7 +107,7 @@ export default function HomePage() {
         const h = q.get('house');
         const e = q.get('event');
         if (e) {
-          if (evs.some((x) => x.id === e && notEnded(x, loadedAt))) {
+          if (evs.some((x) => x.id === e && notEnded(x, Date.now()))) {
             setEventId(e);
             setSheet('event');
             if (startLayer === 'houses') setLayer('both'); // show the pin too; not saved as a preference

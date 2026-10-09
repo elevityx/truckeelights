@@ -51,6 +51,10 @@ describe('other links', () => {
     expect(safeWebsite('http://example.org')).toBeNull();
     expect(safeWebsite('javascript:alert(1)')).toBeNull();
     expect(safeWebsite(null)).toBeNull();
+    expect(safeWebsite('https://bit.ly/x')).toBeNull();
+    expect(safeWebsite('https://127.0.0.1/')).toBeNull();
+    expect(safeWebsite('https://example.org:8443/')).toBeNull();
+    expect(safeWebsite('https://u@example.org/')).toBeNull();
   });
   it('finds the town in an address', () => {
     expect(townOf('10046 Church St, Truckee, CA 96161, USA')).toBe('Truckee');

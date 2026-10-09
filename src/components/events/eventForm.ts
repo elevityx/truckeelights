@@ -1,7 +1,8 @@
 // Client checks for the event form. UX only: submit_event re-validates everything in the database.
 import type { EventInput, Region } from '@/lib/data/types';
 import { inEventBounds } from '@/lib/data/events';
-import { DAY_MS, HOUR_MS, toUtc } from '@/lib/time/pacific';
+import { checkEventUrl, eventUrlMessage } from '@/lib/data/eventUrl';
+import { DAY_MS, HOUR_MS, localDate, toUtc } from '@/lib/time/pacific';
 
 export interface EventDraft {
   title: string;
@@ -42,27 +43,20 @@ export const FIELD_ORDER: readonly Field[] = ['title', 'startDate', 'startTime',
 
 const ADDRESS_CHARS = /^[A-Za-z0-9 ,.#'/-]+$/; // the house address character class (validate_event_address)
 const ANGLE = /[<>]/;
-const SHORTENERS = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'rebrand.ly'];
 const SUBMIT_AHEAD_MS = 120 * DAY_MS;
 const MAX_LENGTH_MS = 31 * DAY_MS;
 
+/** Earliest date the start-date input offers: the region-local date of (now - 1 h), matching the server's grace. */
+export function earliestStartDate(now: number, tz: string): string {
+  return localDate(now - HOUR_MS, tz);
+}
+
 export const collapse = (s: string) => s.trim().replace(/\s+/g, ' ');
 
-/** Mirror of private.valid_event_url. Returns an error message, or null when the URL looks fine. */
+/** Mirror of private.valid_event_url (shared function). Returns an error message, or null when the URL looks fine. */
 export function urlProblem(raw: string): string | null {
-  const v = raw.trim();
-  if (v.length > 300) return 'Use a shorter link (300 characters at most).';
-  if (!/^https:\/\//i.test(v)) return 'Use a link that starts with https://';
-  if (/[\s\\@<>"'\u0000-\u001f\u007f]/.test(v)) return 'That link has characters we can’t accept.';
-  const hostPort = v.slice(8).split(/[/?#]/, 1)[0].toLowerCase();
-  if (hostPort.includes(':')) return 'Leave the port number out of the link.';
-  const host = hostPort.replace(/\.$/, '');
-  if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(host) || host.split('.').some((l) => l === '' || l.startsWith('-') || l.endsWith('-'))) {
-    return 'Use a link to a website, like https://example.org';
-  }
-  if (host === 'localhost' || /^[0-9.]+$/.test(host) || /^0x/.test(host)) return 'Use a link to a website, like https://example.org';
-  if (SHORTENERS.some((s) => host === s || host.endsWith(`.${s}`))) return 'Use the full link, not a shortened one.';
-  return null;
+  const r = checkEventUrl(raw.trim());
+  return r.ok ? null : eventUrlMessage(r.problem);
 }
 
 export interface Checked {

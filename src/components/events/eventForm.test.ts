@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Region } from '@/lib/data/types';
-import { checkDraft, emptyDraft, isBot, urlProblem, type EventDraft } from './eventForm';
+import { checkDraft, earliestStartDate, emptyDraft, isBot, urlProblem, type EventDraft } from './eventForm';
 
 const region: Region = {
   id: 'r', slug: 'truckee', name: 'Truckee', minLat: 39.15, maxLat: 39.45, minLng: -120.42, maxLng: -119.98,
@@ -96,6 +96,11 @@ describe('urlProblem', () => {
     ['https://example.org/a b', 'characters'],
     ['https://example.org\\@evil.com', 'characters'],
     ['https://example.org/' + 'a'.repeat(300), 'shorter'],
+    ['HTTPS://example.org', 'https'],
+    ['https://example.org./event', 'website'],
+    ['https://foo.localhost/x', 'website'],
+    ['https://www.bit.ly/x', 'full link'],
+    ['https://example.org/`x', 'characters'],
   ])('%s', (url, expected) => {
     const p = urlProblem(url);
     if (expected === null) expect(p).toBeNull();
@@ -107,5 +112,13 @@ describe('honeypot', () => {
   it('flags a filled hidden field', () => {
     expect(isBot({ honeypot: '' })).toBe(false);
     expect(isBot({ honeypot: 'http://spam' })).toBe(true);
+  });
+});
+
+describe('earliestStartDate', () => {
+  it('uses the Pacific date of now minus one hour', () => {
+    // 2026-10-31 00:30 PDT = 07:30Z. One hour earlier is still Oct 30 23:30 PDT, so Oct 30 stays selectable.
+    expect(earliestStartDate(Date.parse('2026-10-31T07:30:00Z'), 'America/Los_Angeles')).toBe('2026-10-30');
+    expect(earliestStartDate(Date.parse('2026-10-31T08:30:00Z'), 'America/Los_Angeles')).toBe('2026-10-31');
   });
 });

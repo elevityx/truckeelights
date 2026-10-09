@@ -44,11 +44,11 @@ describe('toAdminEvent', () => {
   it('adds the admin fields', () => {
     const a = toAdminEvent({
       ...raw, ends_at: '2026-10-31T01:00:00Z', status: 'pending', source: 'seed', source_url: 'https://example.org/s',
-      reject_reason: null, created_at: '2026-10-08T00:00:00Z', same_day_warning: true,
+      reject_reason: null, created_at: '2026-10-08T00:00:00Z', same_day_warning: true, season: 'halloween', year: 2026,
     });
     expect(a).toMatchObject({
       endsAt: '2026-10-31T01:00:00.000Z', status: 'pending', source: 'seed', sourceUrl: 'https://example.org/s',
-      rejectReason: null, createdAt: '2026-10-08T00:00:00Z', sameDayWarning: true,
+      rejectReason: null, createdAt: '2026-10-08T00:00:00Z', sameDayWarning: true, season: 'halloween', year: 2026,
     });
   });
 });

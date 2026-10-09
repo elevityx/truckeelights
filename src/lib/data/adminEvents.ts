@@ -3,7 +3,7 @@
 import { getSupabase } from '@/lib/supabase/client';
 import { toDataError } from './errors';
 import { eventArgs, toPublicEvent, type RawPublicEvent } from './events';
-import { DataError, type AdminEvent, type EventInput, type EventStatus } from './types';
+import { DataError, type AdminEvent, type EventInput, type EventStatus, type Season } from './types';
 
 export interface RawAdminEvent extends RawPublicEvent {
   status: EventStatus;
@@ -12,6 +12,8 @@ export interface RawAdminEvent extends RawPublicEvent {
   reject_reason: string | null;
   created_at: string;
   same_day_warning: boolean;
+  season: Season;
+  year: number;
 }
 
 export function toAdminEvent(r: RawAdminEvent): AdminEvent {
@@ -23,10 +25,12 @@ export function toAdminEvent(r: RawAdminEvent): AdminEvent {
     rejectReason: r.reject_reason ?? null,
     createdAt: r.created_at,
     sameDayWarning: r.same_day_warning === true,
+    season: r.season === 'christmas' ? 'christmas' : 'halloween',
+    year: Number(r.year),
   };
 }
 
-/** Rows in that status for the active season, pending first then oldest first (server order, max 500). */
+/** Rows in that status (active season; pending rows of every season/year), pending first then oldest first (server order, max 500). */
 export async function adminEventQueue(regionId: string, status: EventStatus): Promise<AdminEvent[]> {
   try {
     const { data, error } = await getSupabase().rpc('admin_event_queue', { p_region_id: regionId, p_status: status });

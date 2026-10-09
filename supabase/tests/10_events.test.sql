@@ -3,7 +3,7 @@
 -- every moderation transition, admin update/create, retention, and the region-context capability object.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(151);
+select plan(169);
 
 -- ---------------------------------------------------------------- fixtures (as postgres). Do not rely on seed rows.
 delete from public.events;
@@ -20,7 +20,7 @@ update public.site_settings s set active_season = 'halloween', active_year = 202
 select set_config('t.truckee', (select id::text from public.regions where slug = 'truckee'), true);
 select set_config('t.testville', (select id::text from public.regions where slug = 'testville'), true);
 
--- e5..0001-0009 visitors; e5..00a1 global admin, 00a2 testville-only admin, 00a4 anonymous user WITH a global row.
+-- e5..0001-0009 visitors; e5..00a1 global admin, 00a2 testville-only admin, 00a3 truckee-only admin, 00a4 anonymous user WITH a global row.
 insert into auth.users (id, aud, role, email)
 select ('e5000000-0000-4000-a000-00000000000' || n)::uuid, 'authenticated', 'authenticated', 'ev' || n || '@example.test'
   from generate_series(1, 9) n
@@ -30,6 +30,7 @@ select ('e5000000-0000-4000-a000-0000000000a' || n)::uuid, 'authenticated', 'aut
 insert into public.admins (user_id, region_id, note) values
   ('e5000000-0000-4000-a000-0000000000a1', null, 'test global'),
   ('e5000000-0000-4000-a000-0000000000a2', current_setting('t.testville')::uuid, 'test testville'),
+  ('e5000000-0000-4000-a000-0000000000a3', current_setting('t.truckee')::uuid, 'test truckee region admin'),
   ('e5000000-0000-4000-a000-0000000000a4', null, 'test anonymous-with-row');
 
 create schema test_helpers;
@@ -103,6 +104,9 @@ select is(test_helpers.err($$select test_helpers.submit(p_title => 'ab')$$), '22
 select is(test_helpers.err(format('select test_helpers.submit(p_title => %L)', repeat('a', 81))), '22023:invalid_input:title', 'title over 80 chars');
 select is(test_helpers.err($$select test_helpers.submit(p_title => 'Spooky <b>night</b>')$$), '22023:invalid_input:title', 'title with <>');
 select is(test_helpers.err($$select test_helpers.submit(p_title => 'Shit Show Parade')$$), '22023:invalid_input:title', 'title with a blocked term');
+select is(test_helpers.err(format('select test_helpers.submit(p_title => %L)', E'Harvest fu\u200bck Fest')), '22023:invalid_input:title', 'title with a blocked term split by a zero-width space');
+select is(test_helpers.err($$select test_helpers.submit(p_title => 'F.u.c.k Fest Night')$$), '22023:invalid_input:title', 'title with a blocked term spelled with dots');
+select is(test_helpers.err($$select test_helpers.submit(p_description => 'Come to the f-u-c-k fair')$$), '22023:invalid_input:description', 'description with a dash-spelled blocked term');
 select is(test_helpers.err($$select test_helpers.submit(p_title => '   ')$$), '22023:invalid_input:title', 'blank title');
 select is(test_helpers.err($$select test_helpers.submit(p_title => '!!! ###')$$), '22023:invalid_input:title', 'punctuation-only title (empty dedupe key)');
 select is(test_helpers.err($$select test_helpers.submit(p_description => 'too short')$$), '22023:invalid_input:description', 'description under 10 chars');
@@ -300,14 +304,27 @@ select is(test_helpers.submit(p_title => 'Fake Lantern Parade', p_starts_at => c
           'exists|', 'a duplicate still answers exists while the queue is full');
 reset role;
 select is((select count(*)::int from private.quota_events where uid = 'e5000000-0000-4000-a000-000000000007'), 0, 'queue_full consumes no quota');
+-- Amendment 2: the cap is region-wide. A season switch must not reset it, and old-pair pending rows count.
 update public.site_settings set active_season = 'christmas' where region_id = current_setting('t.truckee')::uuid;
 update public.site_settings set events_open = true where region_id = current_setting('t.truckee')::uuid;
 select test_helpers.as_user(7);
 set local role authenticated;
-select is(split_part(test_helpers.submit(p_title => 'Fake Christmas Event'), '|', 1), 'created', 'the cap counts the active pair only');
+select throws_ok($$select test_helpers.submit(p_title => 'Fake Christmas Event')$$, 'P0001', 'queue_full',
+                 '40 pending rows from the OLD pair still give queue_full after a season switch');
 reset role;
 update public.site_settings set active_season = 'halloween' where region_id = current_setting('t.truckee')::uuid;
-delete from public.events where title like 'Cap filler %' or title = 'Fake Christmas Event';
+delete from public.events where title like 'Cap filler %';
+insert into public.events (region_id, season, year, title, description, address, lat, lng, starts_at)
+select current_setting('t.truckee')::uuid, 'christmas', 2024, 'Old pair filler ' || g, 'Raw fixture description.', 'Fixture Plaza, Truckee',
+       39.33, -120.18, now() + interval '3 days'
+  from generate_series(1, 40) g;
+select test_helpers.as_user(7);
+set local role authenticated;
+select throws_ok($$select test_helpers.submit(p_title => 'Fake Over Old Cap')$$, 'P0001', 'queue_full',
+                 '40 old-pair pending rows -> queue_full for the active pair');
+reset role;
+select is((select count(*)::int from private.quota_events where uid = 'e5000000-0000-4000-a000-000000000007'), 0, 'old-pair queue_full consumes no quota');
+delete from public.events where title like 'Old pair filler %';
 
 -- ---------------------------------------------------------------- public reads (anon / authenticated)
 delete from public.events;
@@ -412,6 +429,36 @@ select is((select pending from public.admin_event_counts(current_setting('t.truc
 select is((select count(*)::int from public.admin_event_queue(current_setting('t.truckee')::uuid, 'pending')), 1, 'global admin: admin_event_queue');
 select is(test_helpers.err(format('select * from public.admin_event_queue(%L, %L)', current_setting('t.truckee'), 'bogus')),
           '22023:invalid_input:status', 'admin_event_queue bad status -> invalid_input status');
+
+-- positive matrix: a Truckee-only region admin (aal2, not anonymous) can use every event admin RPC on Truckee
+reset role;
+select test_helpers.raw('e5000000-0000-4000-a000-00000000c005', 'Region Admin Pending', 'pending', now() + interval '1 day', null);
+select test_helpers.claims('e5000000-0000-4000-a000-0000000000a3', false, 'aal2');
+set local role authenticated;
+select is((select count(*)::int from public.admin_event_queue(current_setting('t.truckee')::uuid, 'pending')), 2, 'region admin: admin_event_queue');
+select is((select pending from public.admin_event_counts(current_setting('t.truckee')::uuid)), 2, 'region admin: admin_event_counts');
+select lives_ok($$select public.admin_moderate_event('e5000000-0000-4000-a000-00000000c005', 'approved', null)$$, 'region admin: admin_moderate_event');
+select lives_ok(format($$select public.admin_update_event('e5000000-0000-4000-a000-00000000c005', 'Region Admin Edited', 'An edited description.',
+                         null, 'Fixture Plaza, Truckee', null, 39.33, -120.18, %L, null, null, false)$$, (now() + interval '1 day')::text),
+                'region admin: admin_update_event');
+select lives_ok(format($$select public.admin_create_event(%L, 'Region Admin Seeded', 'Created by a region admin.', null,
+                         'Fixture Plaza, Truckee', null, 39.33, -120.18, %L, null, null, false, null)$$,
+                       current_setting('t.truckee'), (now() + interval '2 days')::text), 'region admin: admin_create_event');
+select lives_ok(format('select public.admin_set_events_open(%L, false)', current_setting('t.truckee')), 'region admin: admin_set_events_open(false)');
+reset role;
+select is((select events_open from public.site_settings where region_id = current_setting('t.truckee')::uuid), false, 'region admin: toggle stuck');
+select test_helpers.claims('e5000000-0000-4000-a000-0000000000a3', false, 'aal2');
+set local role authenticated;
+select lives_ok(format('select public.admin_set_events_open(%L, true)', current_setting('t.truckee')), 'region admin: admin_set_events_open(true)');
+reset role;
+select results_eq($$select title, status::text, moderated_by from public.events where id = 'e5000000-0000-4000-a000-00000000c005'$$,
+  $$values ('Region Admin Edited', 'approved', 'e5000000-0000-4000-a000-0000000000a3'::uuid)$$, 'region admin: moderate and update stuck');
+select results_eq($$select status::text, source, created_by from public.events where title = 'Region Admin Seeded'$$,
+  $$values ('approved', 'seed', 'e5000000-0000-4000-a000-0000000000a3'::uuid)$$, 'region admin: create stuck');
+select is((select count(*)::int from public.events where id <> 'e5000000-0000-4000-a000-00000000c001' and title like 'Region Admin %'), 2,
+          'region admin: no stray rows');
+select test_helpers.claims('e5000000-0000-4000-a000-0000000000a1', false, 'aal2');
+set local role authenticated;
 
 -- ---------------------------------------------------------------- admin_set_events_open
 select lives_ok(format('select public.admin_set_events_open(%L, false)', current_setting('t.truckee')), 'admin_set_events_open(false)');
@@ -534,10 +581,16 @@ values
    'Fixture Plaza, Truckee', 39.33, -120.18, '2026-10-30 23:00:00+00', 'pending', null, now() - interval '9 hours');
 set local role authenticated;
 select results_eq(format('select id, source_url, same_day_warning from public.admin_event_queue(%L, %L)', current_setting('t.truckee'), 'pending'),
-  $$values ('e5000000-0000-4000-a000-00000000d002'::uuid, 'https://example.org/q', true),
+  $$values ('e5000000-0000-4000-a000-00000000d004'::uuid, null::text, false),
+           ('e5000000-0000-4000-a000-00000000d002'::uuid, 'https://example.org/q', true),
            ('e5000000-0000-4000-a000-00000000d001'::uuid, null::text, false)$$,
-  'queue: active pair only, oldest first, source_url included, same-day warning (Oct 30 16:00 and 19:00 Pacific)');
-select is((select pending from public.admin_event_counts(current_setting('t.truckee')::uuid)), 2, 'counts: pending in the active pair');
+  'queue: oldest first, source_url included, same-day warning (Oct 30 16:00 and 19:00 Pacific)');
+select results_eq(format('select id, season, year from public.admin_event_queue(%L, %L)', current_setting('t.truckee'), 'pending'),
+  $$values ('e5000000-0000-4000-a000-00000000d004'::uuid, 'christmas', 2024), ('e5000000-0000-4000-a000-00000000d002'::uuid, 'halloween', 2026),
+           ('e5000000-0000-4000-a000-00000000d001'::uuid, 'halloween', 2026)$$,
+  'queue: pending rows of every season/year, each carrying its season and year (Amendment 2)');
+select is((select pending from public.admin_event_counts(current_setting('t.truckee')::uuid)), 3, 'counts: pending in every season/year');
+select is((select count(*)::int from public.admin_event_queue(current_setting('t.truckee')::uuid, 'approved')), 1, 'queue: non-pending statuses stay on the active pair');
 reset role;
 
 -- ---------------------------------------------------------------- retention sweep

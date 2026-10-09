@@ -9,12 +9,12 @@ import { toDataError } from '@/lib/data/errors';
 import type { RegionContext } from '@/lib/data/types';
 import { eventBounds, inEventBounds } from '@/lib/data/events';
 import { reverseGeocode } from '@/lib/maps/geocode';
-import { createAddressPicker, createPinConfirm } from '@/lib/maps/picker';
+import { createAddressPicker, createPinConfirm, EVENT_PLACE_TYPES } from '@/lib/maps/picker';
 import type { PickedPlace } from '@/lib/maps/types';
-import { localDate } from '@/lib/time/pacific';
+import { useClock } from '@/lib/time/useClock';
 import { eventsApi } from './api';
 import EventGlyph from './EventGlyph';
-import { FIELD_ORDER, checkDraft, emptyDraft, isBot, type EventDraft, type Field, type FieldErrors } from './eventForm';
+import { FIELD_ORDER, checkDraft, earliestStartDate, emptyDraft, isBot, type EventDraft, type Field, type FieldErrors } from './eventForm';
 import { ALREADY_LISTED, THANKS, eventErrorCopy } from './messages';
 
 interface Props {
@@ -47,7 +47,9 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
   const [needCheck, setNeedCheck] = useState(false);
   const [token, setToken] = useState('');
   const [captchaKey, setCaptchaKey] = useState(0);
-  const [today] = useState(() => localDate(Date.now(), tz));
+  const now = useClock();
+  // The server accepts a start up to an hour ago, so the earliest selectable date is the Pacific date of now - 1 h.
+  const today = earliestStartDate(now, tz);
   const set = <K extends keyof EventDraft>(k: K, v: EventDraft[K]) => setD((x) => ({ ...x, [k]: v }));
 
   // Sheet re-runs its focus effect when onClose changes identity, so hand it a stable function.
@@ -64,12 +66,20 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
     if (!formShown || !pickerRef.current) return;
     const b = eventBounds(region);
     const area = { ...region, ...b };
-    return createAddressPicker(pickerRef.current, area, (p: PickedPlace) => {
-      setPicking(false);
-      setGeoNote('');
-      setD((x) => ({ ...x, place: { placeId: p.placeId, lat: p.lat, lng: p.lng }, address: p.address }));
-      setErrors((e) => ({ ...e, location: undefined, address: undefined }));
-    });
+    return createAddressPicker(
+      pickerRef.current,
+      area,
+      (p: PickedPlace) => {
+        setPicking(false);
+        setGeoNote('');
+        setD((x) => ({ ...x, place: { placeId: p.placeId, lat: p.lat, lng: p.lng }, address: p.address }));
+        setErrors((e) => ({ ...e, location: undefined, address: undefined }));
+      },
+      {
+        allowTypes: EVENT_PLACE_TYPES,
+        onReject: () => setGeoNote('Pick a venue, park, plaza or street address, not a whole town or road.'),
+      },
+    );
   }, [formShown, region]);
 
   // Or drop a pin: a draggable pin on a small map; the address comes from a reverse lookup and stays editable.
@@ -101,7 +111,7 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
         .catch(() => {
           if (n === geoSeq.current) setGeoNote('Couldn’t look up that spot. Type the address below.');
         });
-    });
+    }, eventBounds(region));
   }, [picking, region, season]);
 
   // Move focus to the first field with a problem after a failed send.

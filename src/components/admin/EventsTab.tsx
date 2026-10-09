@@ -191,6 +191,9 @@ function Card({ ev, ctx, onForbidden, onChanged }: { ev: AdminEvent; ctx: Region
       <div className="ev-title">
         <p className="addr">{ev.title}</p>
         {ev.adultsOnly && <span className="pill">21+</span>}
+        {(ev.season !== ctx.season || ev.year !== ctx.year) && (
+          <span className="pill" title="Submitted under an earlier season">{ev.season === 'halloween' ? 'Halloween' : 'Christmas'} {ev.year}</span>
+        )}
         <span className="pill">{ev.source}</span>
       </div>
       {ev.sameDayWarning && <p className="ev-warn" role="status">Same-day warning: another event with a similar title starts on this day. Check for a duplicate.</p>}
@@ -198,7 +201,19 @@ function Card({ ev, ctx, onForbidden, onChanged }: { ev: AdminEvent; ctx: Region
       <p className="fine">{ev.venue ? `${ev.venue} · ` : ''}{ev.address}</p>
       <p className="ev-desc">{ev.description}</p>
       {host && (
-        <p className="ev-host">Link goes to <b className={host === 'unrecognized link' ? 'bad' : ''}>{host}</b></p>
+        <p className="ev-host">
+          Link goes to <b className={host === 'unrecognized link' ? 'bad' : ''}>{host}</b>
+          {ev.url && (
+            <>
+              <br />
+              <span className="fine ev-fullurl">
+                {host === 'unrecognized link' ? ev.url : (
+                  <a href={ev.url} target="_blank" rel="nofollow ugc noopener noreferrer">{ev.url}</a>
+                )}
+              </span>
+            </>
+          )}
+        </p>
       )}
       {ev.sourceUrl && sourceHost && (
         <p className="fine">
@@ -208,6 +223,7 @@ function Card({ ev, ctx, onForbidden, onChanged }: { ev: AdminEvent; ctx: Region
         </p>
       )}
       {ev.status === 'rejected' && ev.rejectReason && <p className="fine">Rejected: {ev.rejectReason}</p>}
+      <p className="fine">Submitted {fmt(ev.createdAt, tz)}</p>
       <p className="fine"><a href={`https://www.google.com/maps/search/?${new URLSearchParams({ api: '1', query: `${ev.lat},${ev.lng}` }).toString()}`} target="_blank" rel="noopener noreferrer">{ev.lat.toFixed(5)}, {ev.lng.toFixed(5)}</a></p>
       {err && <p className="err" role="alert">{err}</p>}
       {editing ? (

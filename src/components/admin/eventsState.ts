@@ -2,6 +2,7 @@
 // The database re-validates everything; these checks are for fast feedback only.
 import { eventUserMessage } from '@/lib/data/errors';
 import { inEventBounds } from '@/lib/data/events';
+import { eventUrlHost } from '@/lib/data/eventUrl';
 import type { AdminEvent, DataError, EventInput, EventStatus, Region } from '@/lib/data/types';
 import { toUtc, utcToLocal } from '@/lib/time/pacific';
 
@@ -32,19 +33,10 @@ export function checkReason(raw: string): { ok: true; reason: string } | { ok: f
   return { ok: true, reason };
 }
 
-// ---- URL (A6 mirror) -------------------------------------------------------------------------------
-const SHORTENERS = new Set(['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'rebrand.ly']);
-const HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
-
+// ---- URL (A6 mirror): the shared validator in src/lib/data/eventUrl.ts ------------------------------
 /** The lowercase hostname if `raw` passes the event URL rules, else null. */
 export function parseEventUrl(raw: string): string | null {
-  if (raw.length > 300 || !/^https:\/\/[^\s@\\<>"']+$/.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) return null;
-  const rest = raw.slice('https://'.length);
-  const authority = rest.split(/[/?#]/, 1)[0];
-  if (authority === '' || authority.includes(':') || authority.includes('[')) return null; // port or IPv6
-  const host = authority.toLowerCase();
-  if (!HOST_RE.test(host) || SHORTENERS.has(host) || /^[0-9.]+$/.test(host) || host.endsWith('.localhost')) return null;
-  return host;
+  return eventUrlHost(raw);
 }
 
 /** Hostname to show on a card: the parsed host when valid, else a marked fallback so a bad link never looks fine. */

@@ -45,7 +45,7 @@ describe('parseEventUrl (A6)', () => {
     'http://example.com', 'javascript:alert(1)', 'https://user@example.com', 'https://user:pw@example.com', 'https://example.com:8443/',
     'https://localhost/', 'https://intranet/', 'https://127.0.0.1/', 'https://2130706433/', 'https://0x7f000001/', 'https://[::1]/',
     'https://bit.ly/abc', 'https://t.co/x', 'https://exa mple.com', 'https://example.com/a\\b', 'https://example.com/"x', `https://example.com/${'a'.repeat(300)}`,
-    'https://example.c', 'https://-bad.com',
+    'https://example.c', 'https://-bad.com', 'https://www.bit.ly/x', 'HTTPS://example.com', 'https://example.com./x', 'https://example.com/`x',
   ])('rejects %s', (u) => {
     expect(parseEventUrl(u)).toBeNull();
   });

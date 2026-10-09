@@ -12,3 +12,4 @@
 .ev-form .ev-wide{grid-column:1 / -1}
 .ev-form textarea.field{resize:vertical}
 .ev-form .lbl .err{font-size:14px}
+.ev-fullurl{overflow-wrap:anywhere; word-break:break-all; font-size:15px}
