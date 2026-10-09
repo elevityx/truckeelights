@@ -46,7 +46,7 @@ The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_S
 - `src/lib/maps` (adapter; event pins are a constant glyph plus `textContent` labels; the map's camera box comes from `eventBounds` in `src/lib/data/events.ts`, the one TS mirror of SQL `private.event_bounds`), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`; the Events tab is `EventsTab.tsx` with pure helpers and tests in `eventsState.ts`, wired to `src/lib/data/adminEvents.ts`)
 - `src/lib/share` (pure share-URL builders + Web Share/copy helper; `qr.ts` turns a URL into SVG path data with `qrcode`, used only from server components so it runs at build time and ships no runtime code)
-- `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console)
+- `src/app/flyer` + `src/components/flyer` (printable QR flyer at `/flyer/`, noindex, linked from the admin console; color or black & white ink via `?ink=color|bw` and `localStorage` key `tl:flyer-ink`, color by default; the QR stays black on white)
 - `public/og/{halloween,christmas}.png` (1200×630 social cards; site-wide OG/Twitter meta in `src/app/layout.tsx`). Source is `scripts/og/card.html`; regenerate with `node scripts/og/render.mjs` (needs local Chrome; not part of the build)
 - `supabase/migrations` (schema; never edited after merge), `supabase/seed.sql` (fake local data only), `supabase/tests` (pgTAP)
 - `scripts/probe-network-header.mjs` (network-header probe for the vote network cap; run against a deployed origin, not part of CI)
