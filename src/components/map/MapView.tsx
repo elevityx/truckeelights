@@ -5,6 +5,7 @@ import { XIcon } from '@/components/shell/Icons';
 import type { PinView, PublicEvent, Region, Season } from '@/lib/data/types';
 import { getMapAdapter } from '@/lib/maps';
 import { findNearbyDuplicate, inRegion, mapPickMessage, pickStreetResult } from '@/lib/maps/mapPick';
+import type { Padding } from '@/lib/maps/eventLayout';
 import type { MapAdapter, PickedPlace } from '@/lib/maps/types';
 import { Fog, Troll } from './Decor';
 
@@ -22,13 +23,35 @@ interface Props {
   onSelectEvent?(id: string): void;
   /** Set when the layer switch shows events: changes the hint. */
   eventsHint?: { houses: boolean; count: number } | null;
+  /** Bump to fit the camera to the shown events (the layer switched to Events, or the page opened on it). 0 = never. */
+  fitEventsSeq?: number;
 }
 
 type Pop = { kind: 'busy' } | { kind: 'dup'; pin: PinView } | { kind: 'msg'; text: string } | null;
 
 const NO_EVENTS: PublicEvent[] = [];
 
-export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt, events = NO_EVENTS, onSelectEvent, eventsHint = null }: Props) {
+/** Event pins hang up to ~64px above their point (disc + date badge); keep that clear under top controls. */
+const PIN_H = 64;
+const EDGE = 28;
+
+/** Pixels to keep clear on each side: the float layer switch, the Map/List pill, and room for a pin. */
+function fitPadding(wrap: HTMLElement): Padding {
+  const w = wrap.getBoundingClientRect();
+  let top = 0;
+  let bottom = 0;
+  const controls = [wrap.parentElement?.querySelector('.layerfloat'), wrap.parentElement?.querySelector('.viewtoggle')];
+  for (const c of controls) {
+    if (!(c instanceof HTMLElement)) continue;
+    const r = c.getBoundingClientRect();
+    if (!r.width || !r.height) continue; // hidden at this width
+    if (r.top + r.height / 2 < w.top + w.height / 2) top = Math.max(top, r.bottom - w.top);
+    else bottom = Math.max(bottom, w.bottom - r.top);
+  }
+  return { top: top + PIN_H, right: EDGE, bottom: bottom + 16, left: EDGE };
+}
+
+export default function MapView({ season, region, pins, selectedId, onSelect, pickEnabled, onAddAt, events = NO_EVENTS, onSelectEvent, eventsHint = null, fitEventsSeq = 0 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const adapter = useRef<MapAdapter | null>(null);
   const pinsRef = useRef(pins);
@@ -134,6 +157,12 @@ export default function MapView({ season, region, pins, selectedId, onSelect, pi
   useEffect(() => {
     adapter.current?.setEvents(events, region.timezone);
   }, [events, region.timezone]);
+
+  // After the events effect above, so the adapter fits the events this render shows.
+  useEffect(() => {
+    const el = host.current?.parentElement;
+    if (fitEventsSeq > 0 && el) adapter.current?.fitEvents(fitPadding(el));
+  }, [fitEventsSeq]);
 
   useEffect(() => {
     if (selectedId) adapter.current?.focus(selectedId);

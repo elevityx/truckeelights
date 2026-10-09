@@ -6,9 +6,10 @@ import { loadGoogle } from './loader';
 import { dateBadge, formatRange } from '@/lib/time/pacific';
 import { eventBoundsAdmin } from '@/lib/data/events';
 
+import { fitEventsCamera, fitTargets, spreadOffsets, type Padding } from './eventLayout';
 import { EVENT_GLYPHS, GLYPHS, PROBES, pickGlyph } from './glyphs';
 import { buildMeter, updateMeter } from './meterEl';
-import type { MapAdapter } from './types';
+import type { MapAdapter, MapMountOptions } from './types';
 
 /** Amendment 3: the camera may pan over the admin box (Reno, Carson City), so "Worth the drive" pins can be seen. */
 function eventLatLngBounds(r: Parameters<typeof eventBoundsAdmin>[0]) {
@@ -30,6 +31,8 @@ export function createGoogleAdapter(): MapAdapter {
   const emarkers = new Map<string, { m: google.maps.marker.AdvancedMarkerElement; el: HTMLElement; ev: PublicEvent }>();
   const eventListeners = new Set<(id: string) => void>();
   let pendingEvents: { events: PublicEvent[]; tz: string } | null = null;
+  let region: MapMountOptions['region'] | null = null;
+  let pendingFit: Padding | null = null;
   const clickListeners = new Set<(p: { lat: number; lng: number }) => void>();
   let lastPinClick = 0; // a pin tap must never also count as an empty-map tap
   let probe: google.maps.marker.AdvancedMarkerElement | null = null;
@@ -129,6 +132,35 @@ export function createGoogleAdapter(): MapAdapter {
       if (selected === ev.id) el.classList.add('sel');
       emarkers.set(ev.id, { m, el, ev });
     }
+    spread();
+  };
+
+  // Fan out event pins at one venue, or whose pins overlap at this zoom, on a small ring. Houses never move.
+  const spread = () => {
+    if (!map) return;
+    const z = map.getZoom();
+    if (z == null) return;
+    const offs = spreadOffsets(
+      [...emarkers.values()].map(({ ev }) => ({ id: ev.id, lat: ev.lat, lng: ev.lng, startsAt: ev.startsAt })),
+      z,
+    );
+    for (const [id, rec] of emarkers) {
+      const o = offs.get(id);
+      rec.el.style.setProperty('--dx', `${o?.dx ?? 0}px`);
+      rec.el.style.setProperty('--dy', `${o?.dy ?? 0}px`);
+      // In a ring, a higher pin draws over a lower one so its date badge (which hangs below the disc) stays readable.
+      rec.m.zIndex = o ? 510 - Math.round(o.dy / 4) : 500;
+    }
+  };
+
+  const fit = (pad: Padding) => {
+    if (!map || !region || !div) return false;
+    const evs = [...emarkers.values()].map(({ ev }) => ev);
+    const cam = fitEventsCamera(fitTargets(evs, region), region, { width: div.clientWidth, height: div.clientHeight }, pad);
+    if (!cam) return true; // nothing to fit: leave the camera alone
+    zoomToken++; // cancel any running zoomTo
+    map.moveCamera({ center: cam.center, zoom: cam.zoom });
+    return true;
   };
 
   return {
@@ -140,6 +172,7 @@ export function createGoogleAdapter(): MapAdapter {
       if (dead) return;
       marker = libs.marker;
       const r = o.region;
+      region = r;
       div = document.createElement('div');
       div.className = 'mapdiv';
       el.appendChild(div);
@@ -163,6 +196,11 @@ export function createGoogleAdapter(): MapAdapter {
       });
       if (pending) render(pending);
       if (pendingEvents) renderEvents(pendingEvents.events, pendingEvents.tz);
+      map.addListener('zoom_changed', spread);
+      if (pendingFit && fit(pendingFit)) pendingFit = null;
+    },
+    fitEvents(pad) {
+      pendingFit = fit(pad) ? null : pad;
     },
     onMapClick(cb) {
       clickListeners.add(cb);
@@ -239,6 +277,7 @@ export function createGoogleAdapter(): MapAdapter {
       clickListeners.clear();
       if (probe) probe.map = null;
       probe = null;
+      pendingFit = null;
       zoomToken++;
       map = null;
       div?.remove();
