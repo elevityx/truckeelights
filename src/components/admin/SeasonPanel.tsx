@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { adminSetSeason, getRegionContext, runStorageJobsFallback, toDataError, userMessage, type RegionContext, type Season } from '@/lib/data';
+import { adminSetSeason, getRegionContext, toDataError, userMessage, type RegionContext, type Season } from '@/lib/data';
 import { applySeason } from '@/lib/theme/applySeason';
+import { CLEANUP_WARNING } from './photosState';
 import { SEASON_LABEL, isSameSeason, statusLine, switchConfirmText, toggleCopy, yearChoices } from './seasonState';
 
 interface Props {
@@ -10,11 +11,13 @@ interface Props {
   onCtx(c: RegionContext): void;
   /** A forbidden error means the session may have dropped to aal1: re-run the gate. */
   onForbidden(): void;
+  /** Runs storage cleanup; `pending` means it failed or left jobs open. */
+  onCleanup(): Promise<{ pending: boolean }>;
 }
 
 type Toast = { ok: boolean; text: string };
 
-export default function SeasonPanel({ ctx, onCtx, onForbidden }: Props) {
+export default function SeasonPanel({ ctx, onCtx, onForbidden, onCleanup }: Props) {
   const live = { season: ctx.season, year: ctx.year, open: ctx.submissionsOpen };
   const [target, setTarget] = useState<{ season: Season; year: number }>({ season: ctx.season, year: ctx.year });
   const [confirm, setConfirm] = useState<'toggle' | 'switch' | null>(null);
@@ -30,12 +33,12 @@ export default function SeasonPanel({ ctx, onCtx, onForbidden }: Props) {
     setToast(null);
     try {
       await adminSetSeason(ctx.region.id, season, year, open);
-      await runStorageJobsFallback(ctx.region.id).catch(() => undefined); // A.3: run cleanup now; the banner covers failures
+      const cleanup = await onCleanup(); // A.3: run cleanup now
       const fresh = await getRegionContext(ctx.region.slug);
       applySeason(fresh.season);
       onCtx(fresh);
       setTarget({ season: fresh.season, year: fresh.year });
-      setToast({ ok: true, text: success });
+      setToast(cleanup.pending ? { ok: false, text: `${success} ${CLEANUP_WARNING.replace('Photo hidden in the app, but file', 'File')} See the warning above to retry.` } : { ok: true, text: success });
     } catch (e) {
       const d = toDataError(e);
       if (d.code === 'forbidden') return onForbidden();

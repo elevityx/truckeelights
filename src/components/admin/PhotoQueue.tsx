@@ -9,27 +9,29 @@ import {
   adminRevokePhoto,
   adminSetPhotosOpen,
   getRegionContext,
-  runStorageJobsFallback,
   toDataError,
   userMessage,
   type AdminPhoto,
   type RegionContext,
 } from '@/lib/data';
-import { relativeAge } from './photosState';
+import { relativeAge, switchChecked, switchDisabled, switchFromOpen, switchStatusText, switchTarget, type PhotosSwitch } from './photosState';
 import './photos-admin.css';
 
 interface Props {
   ctx: RegionContext;
   onForbidden(): void;
+  /** Runs storage cleanup after a moderation action and reports it to the console. */
+  onCleanup(): Promise<void>;
 }
 
-export default function PhotoQueue({ ctx, onForbidden }: Props) {
-  const [open, setOpen] = useState(ctx.photosOpen);
+export default function PhotoQueue({ ctx, onForbidden, onCleanup }: Props) {
+  const [sw, setSw] = useState<PhotosSwitch>({ kind: 'loading' });
   const [pending, setPending] = useState<AdminPhoto[] | null>(null);
   const [live, setLive] = useState<AdminPhoto[] | null>(null);
   const [err, setErr] = useState('');
   const [switchBusy, setSwitchBusy] = useState(false);
   const region = ctx.region.id;
+  const slug = ctx.region.slug;
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -53,17 +55,39 @@ export default function PhotoQueue({ ctx, onForbidden }: Props) {
     return () => clearTimeout(t);
   }, [load]);
 
+  // The switch always shows the server's photos_open: loaded on mount, never defaulted.
+  const loadSwitch = useCallback(async () => {
+    setSw({ kind: 'loading' });
+    try {
+      const fresh = await getRegionContext(slug);
+      setSw(switchFromOpen(fresh.photosOpen));
+    } catch {
+      setSw({ kind: 'unknown' });
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void loadSwitch(), 0);
+    return () => clearTimeout(t);
+  }, [loadSwitch]);
+
   async function toggle() {
+    const target = switchTarget(sw);
+    if (target === null) return;
     setSwitchBusy(true);
     setErr('');
     try {
-      await adminSetPhotosOpen(region, !open);
-      const fresh = await getRegionContext(ctx.region.slug); // show what the database says
-      setOpen(fresh.photosOpen);
+      await adminSetPhotosOpen(region, target);
     } catch (e) {
       const d = toDataError(e);
       if (d.code === 'forbidden') return onForbidden();
       setErr(userMessage(d, ctx.region.name));
+    }
+    try {
+      const fresh = await getRegionContext(slug); // show what the database says, even after an error
+      setSw(switchFromOpen(fresh.photosOpen));
+    } catch {
+      setSw({ kind: 'unknown' });
     } finally {
       setSwitchBusy(false);
     }
@@ -73,17 +97,22 @@ export default function PhotoQueue({ ctx, onForbidden }: Props) {
     <section className="panel pq-sec" aria-label="Photos">
       <div className="pq-head">
         <h3>Photos</h3>
-        <button className="sw" type="button" role="switch" aria-checked={open} disabled={switchBusy} onClick={() => void toggle()}>
+        <button className="sw" type="button" role="switch" aria-checked={switchChecked(sw)} disabled={switchDisabled(sw, switchBusy)} onClick={() => void toggle()}>
           <span className="tr" aria-hidden="true" />
-          Visitors can add photos
+          Visitors can add photos: {switchStatusText(sw)}
         </button>
+        {sw.kind === 'unknown' && (
+          <span role="alert" className="err">
+            Couldn&apos;t check whether uploads are on. <button className="btn ghost" type="button" onClick={() => void loadSwitch()}>Retry</button>
+          </span>
+        )}
       </div>
       {err && <p className="err" role="alert">{err}</p>}
       <h4>Pending{pending ? ` (${pending.length})` : ''}</h4>
       {pending === null ? <p className="fine">Loading…</p> : pending.length === 0 ? <p className="fine">Nothing waiting for review.</p> : (
         <div className="queue">
           {pending.map((p) => (
-            <Card key={p.id} photo={p} region={region} ctxName={ctx.region.name} onForbidden={onForbidden} onChanged={load} />
+            <Card key={p.id} photo={p} region={region} ctxName={ctx.region.name} onForbidden={onForbidden} onChanged={load} onCleanup={onCleanup} />
           ))}
         </div>
       )}
@@ -91,7 +120,7 @@ export default function PhotoQueue({ ctx, onForbidden }: Props) {
       {live === null ? <p className="fine">Loading…</p> : live.length === 0 ? <p className="fine">No photos are live.</p> : (
         <div className="queue">
           {live.map((p) => (
-            <Card key={p.id} photo={p} region={region} ctxName={ctx.region.name} onForbidden={onForbidden} onChanged={load} />
+            <Card key={p.id} photo={p} region={region} ctxName={ctx.region.name} onForbidden={onForbidden} onChanged={load} onCleanup={onCleanup} />
           ))}
         </div>
       )}
@@ -99,8 +128,8 @@ export default function PhotoQueue({ ctx, onForbidden }: Props) {
   );
 }
 
-function Card({ photo, region, ctxName, onForbidden, onChanged }: {
-  photo: AdminPhoto; region: string; ctxName: string; onForbidden(): void; onChanged(): Promise<void>;
+function Card({ photo, ctxName, onForbidden, onChanged, onCleanup }: {
+  photo: AdminPhoto; region: string; ctxName: string; onForbidden(): void; onChanged(): Promise<void>; onCleanup(): Promise<void>;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [thumbErr, setThumbErr] = useState(false);
@@ -124,7 +153,7 @@ function Card({ photo, region, ctxName, onForbidden, onChanged }: {
     setUnreadable(false);
     try {
       await fn();
-      await runStorageJobsFallback(region).catch(() => undefined); // A.3: run cleanup now; the banner covers failures
+      await onCleanup(); // A.3: run cleanup now; the console shows a warning if it stays pending
       await onChanged();
     } catch (e) {
       const d = toDataError(e);

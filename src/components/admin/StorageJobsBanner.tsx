@@ -8,11 +8,13 @@ import './photos-admin.css';
 interface Props {
   ctx: RegionContext;
   onForbidden(): void;
+  /** Bump to re-poll immediately (after a cleanup attempt). */
+  refreshKey?: number;
 }
 
 const POLL_MS = 30_000;
 
-export default function StorageJobsBanner({ ctx, onForbidden }: Props) {
+export default function StorageJobsBanner({ ctx, onForbidden, refreshKey = 0 }: Props) {
   const [stuck, setStuck] = useState(0);
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
@@ -39,7 +41,7 @@ export default function StorageJobsBanner({ ctx, onForbidden }: Props) {
       clearTimeout(first);
       clearInterval(t);
     };
-  }, [poll]);
+  }, [poll, refreshKey]);
 
   async function runNow() {
     setBusy(true);

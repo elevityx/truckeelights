@@ -34,3 +34,44 @@ export function relativeAge(iso: string, now: number): string {
   for (const [unit, ms] of UNITS) if (Math.abs(diff) >= ms) return fmt.format(Math.round(diff / ms), unit);
   return 'just now';
 }
+
+/** Kill-switch view of the server's `photos_open`. Never seeded from a default: it starts as `loading`. */
+export type PhotosSwitch = { kind: 'loading' } | { kind: 'on' } | { kind: 'off' } | { kind: 'unknown' };
+
+export const switchFromOpen = (open: boolean): PhotosSwitch => ({ kind: open ? 'on' : 'off' });
+
+/** Only a value read from the server can be toggled. */
+export function switchDisabled(s: PhotosSwitch, busy: boolean): boolean {
+  return busy || (s.kind !== 'on' && s.kind !== 'off');
+}
+
+/** `true`/`false` for aria-checked, `undefined` while the state isn't known (never reports OFF). */
+export function switchChecked(s: PhotosSwitch): boolean | undefined {
+  return s.kind === 'on' ? true : s.kind === 'off' ? false : undefined;
+}
+
+export function switchStatusText(s: PhotosSwitch): string {
+  switch (s.kind) {
+    case 'on': return 'On';
+    case 'off': return 'Off';
+    case 'loading': return 'Checking…';
+    default: return 'Unknown';
+  }
+}
+
+/** The value a click should request, or null when the current state isn't known. */
+export function switchTarget(s: PhotosSwitch): boolean | null {
+  return s.kind === 'on' ? false : s.kind === 'off' ? true : null;
+}
+
+export const CLEANUP_WARNING = 'Photo hidden in the app, but file cleanup is still pending.';
+
+/** Runs the post-action storage cleanup. Pending means it threw or left jobs open. */
+export async function settleCleanup(run: () => Promise<{ open: number }>): Promise<{ pending: boolean }> {
+  try {
+    const r = await run();
+    return { pending: !(r.open === 0) };
+  } catch {
+    return { pending: true };
+  }
+}
