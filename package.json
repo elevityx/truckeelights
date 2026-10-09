@@ -10,9 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:start": "sh supabase/start-local.sh",
-    "db:reset": "supabase db reset",
+    "db:reset": "supabase db reset && sh supabase/storage-jobs-local.sh",
     "db:test": "supabase test db",
-    "test:concurrency": "node --test 'tests/db-concurrency/*.test.mjs'"
+    "test:concurrency": "node --test 'tests/db-concurrency/*.test.mjs'",
+    "test:storage": "node --test --test-concurrency=1 'tests/storage/*.test.mjs'"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "2.1.3",

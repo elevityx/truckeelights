@@ -7,13 +7,17 @@ import {
   adminReleaseHouse,
   adminSetHouseStatus,
   listMapHouses,
+  runStorageJobsFallback,
   toDataError,
   userMessage,
   type AdminHouse,
   type HouseStatus,
   type RegionContext,
 } from '@/lib/data';
+import PhotoQueue from './PhotoQueue';
 import SeasonPanel from './SeasonPanel';
+import StorageJobsBanner from './StorageJobsBanner';
+import { CLEANUP_WARNING, settleCleanup } from './photosState';
 import { SEASON_LABEL } from './seasonState';
 
 const REASONS = ['Duplicate', 'Not a display', 'Owner asked us to remove it', 'Inappropriate', 'Other'];
@@ -27,8 +31,24 @@ interface Props {
 }
 
 export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
-  const [tab, setTab] = useState<'season' | 'houses'>('season');
+  const [tab, setTab] = useState<'season' | 'houses' | 'photos'>('season');
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
+  const [cleanupPending, setCleanupPending] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [bannerTick, setBannerTick] = useState(0);
+
+  /** A.3: run cleanup now. A throw or leftover jobs raises a visible warning; success clears it. */
+  const runCleanup = useCallback(async () => {
+    const r = await settleCleanup(() => runStorageJobsFallback(ctx.region.id));
+    setCleanupPending(r.pending);
+    setBannerTick((n) => n + 1);
+    return r;
+  }, [ctx.region.id]);
+  const cleanupAfterAction = useCallback(async () => { await runCleanup(); }, [runCleanup]);
+  async function retryCleanup() {
+    setCleanupBusy(true);
+    try { await runCleanup(); } finally { setCleanupBusy(false); }
+  }
 
   const refreshCount = useCallback(() => {
     listMapHouses(ctx.region.id)
@@ -54,24 +74,31 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
           <span className="chip">Submissions <b>{ctx.submissionsOpen ? 'open' : 'closed'}</b></span>
           <span className="chip">Visible houses <b>{visibleCount ?? '–'}</b></span>
         </div>
+        <StorageJobsBanner ctx={ctx} onForbidden={onForbidden} refreshKey={bannerTick} />
+        {cleanupPending && (
+          <div className="confirm" role="status">
+            <p>{CLEANUP_WARNING}</p>
+            <div className="row">
+              <button className="btn ghost" type="button" disabled={cleanupBusy} onClick={() => void retryCleanup()}>{cleanupBusy ? 'Retrying…' : 'Retry'}</button>
+            </div>
+          </div>
+        )}
         <div className="tabs" role="tablist" aria-label="Back office sections">
-          {(['season', 'houses'] as const).map((k) => (
+          {(['season', 'houses', 'photos'] as const).map((k) => (
             <button key={k} type="button" role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-              {k === 'season' ? 'Season' : 'Houses'}
+              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : 'Photos'}
             </button>
           ))}
         </div>
-        {tab === 'season' ? (
-          <SeasonPanel ctx={ctx} onCtx={onCtx} onForbidden={onForbidden} />
-        ) : (
-          <HousesPanel ctx={ctx} onForbidden={onForbidden} onChanged={refreshCount} />
-        )}
+        {tab === 'season' && <SeasonPanel ctx={ctx} onCtx={onCtx} onForbidden={onForbidden} onCleanup={runCleanup} />}
+        {tab === 'houses' && <HousesPanel ctx={ctx} onForbidden={onForbidden} onChanged={refreshCount} onCleanup={cleanupAfterAction} />}
+        {tab === 'photos' && <PhotoQueue ctx={ctx} onForbidden={onForbidden} onCleanup={cleanupAfterAction} />}
       </div>
     </div>
   );
 }
 
-function HousesPanel({ ctx, onForbidden, onChanged }: { ctx: RegionContext; onForbidden(): void; onChanged(): void }) {
+function HousesPanel({ ctx, onForbidden, onChanged, onCleanup }: { ctx: RegionContext; onForbidden(): void; onChanged(): void; onCleanup(): Promise<void> }) {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState<HouseStatus | ''>('');
@@ -113,6 +140,7 @@ function HousesPanel({ ctx, onForbidden, onChanged }: { ctx: RegionContext; onFo
     setErr('');
     try {
       await fn();
+      await onCleanup(); // A.3: warning shows in the console if cleanup stays pending
       setHiding(null);
       setReleasing(null);
       await load();

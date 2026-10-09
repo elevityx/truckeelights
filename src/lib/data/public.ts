@@ -22,6 +22,7 @@ interface RawContext {
   year: number;
   submissions_open: boolean;
   wordmark: string;
+  photos_open?: boolean;
 }
 
 export async function getRegionContext(slug?: string): Promise<RegionContext> {
@@ -50,6 +51,7 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
       year: c.year,
       submissionsOpen: c.submissions_open,
       wordmark: c.wordmark,
+      photosOpen: c.photos_open === true,
     };
   } catch (e) {
     throw e instanceof DataError ? e : toDataError(e);

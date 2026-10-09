@@ -1,0 +1,9 @@
+.pq-head{display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between}
+.pq-sec{display:flex; flex-direction:column; gap:12px}
+.queue{display:grid; gap:12px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.qcard{display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:var(--radius); background:var(--surface); border:1px solid var(--line)}
+.qcard .thumb{width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:10px; background:var(--bg); border:1px solid var(--line)}
+.qcard .thumb.ph{display:grid; place-items:center; color:var(--muted); font-size:14px}
+.qcard .addr{font-weight:700; margin:0}
+.qcard .btn{min-height:44px}
+.jobs-banner{margin-bottom:12px; border-color:var(--danger)}

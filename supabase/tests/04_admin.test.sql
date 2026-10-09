@@ -152,15 +152,21 @@ select throws_ok($$select public.admin_set_house_status('d4000000-0000-4000-a000
 select throws_ok($$select public.admin_release_house('d4000000-0000-4000-a000-0000000000ff')$$, 'P0002', 'not_found', 'global admin: release unknown house -> not_found');
 reset role;
 
--- ---------------------------------------------------------------- AC23: no storage dependency in R1
-select is((select count(*)::int from storage.buckets), 0, 'AC23: storage.buckets has 0 rows');
-select ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-                       where n.nspname in ('public', 'private') and c.relname in ('photos', 'storage_jobs')),
-          'AC23: no photos or storage_jobs table');
-select ok(not exists (select 1 from pg_extension where extname = 'pg_cron')
+-- ---------------------------------------------------------------- AC23 (R2): exactly two PRIVATE photo buckets
+select results_eq(
+  $$select id, public, file_size_limit::bigint, allowed_mime_types from storage.buckets order by id$$,
+  $$values ('photo-uploads'::text, false, 5242880::bigint, array['image/jpeg']::text[]),
+           ('photos'::text, false, 5242880::bigint, array['image/jpeg']::text[])$$,
+  'AC23: storage.buckets = 2, both private, 5 MiB, JPEG only');
+select ok((select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where (n.nspname, c.relname) in (('public', 'photos'), ('private', 'storage_jobs'))) = 2,
+          'AC23: photos and storage_jobs tables exist');
+select ok(exists (select 1 from pg_extension where extname = 'pg_cron')
           and not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                           where n.nspname in ('public', 'private') and (p.prosrc ~* '\m(net|storage|cron)\.')),
-          'AC23: no cron, and no R1 function touches net.*, storage.* or cron.*');
+                           where n.nspname in ('public', 'private')
+                             and p.proname in ('submit_house', 'admin_whoami', 'admin_list_houses', 'is_admin', 'lock_quota')
+                             and p.prosrc ~* '\m(net|storage|cron)\.'),
+          'AC23: pg_cron installed; the unchanged R1 functions still touch no net.*, storage.* or cron.*');
 
 -- ---------------------------------------------------------------- AC10: default region + app_settings guards
 select is((select count(*)::int from public.app_settings), 1, 'app_settings row exists');

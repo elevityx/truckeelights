@@ -19,6 +19,8 @@ export interface AddHouseSheetProps {
   onClose(): void;
   onCreated(houseId: string): void;
   onOpenExisting(houseId: string): void;
+  /** Set only while photo uploads are open: offered on the success result. */
+  onAddPhotos?(houseId: string): void;
   /** From a map tap: start at the pin step with this place. */
   initialPlace?: PickedPlace;
   /** This season's houses, for the "already on the map" check after the pin moves. */
@@ -31,7 +33,7 @@ function latlng(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, initialPlace, pins }: AddHouseSheetProps) {
+export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, onAddPhotos, initialPlace, pins }: AddHouseSheetProps) {
   const [s, dispatch] = useReducer(reducer, initialPlace, (p) => (p ? reducer(initialState, { type: 'picked', place: p }) : initialState));
   const [token, setToken] = useState('');
   const [session, setSession] = useState<boolean | null>(null);
@@ -146,7 +148,12 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
           <strong>{res.address}</strong> is on the {seasonLabel} map.
         </p>
         <div className="actions">
-          <button type="button" className="btn primary" onClick={() => onCreated(res.houseId)}>
+          {onAddPhotos && (
+            <button type="button" className="btn primary" onClick={() => onAddPhotos(res.houseId)}>
+              Add photos
+            </button>
+          )}
+          <button type="button" className={onAddPhotos ? 'btn ghost' : 'btn primary'} onClick={() => onCreated(res.houseId)}>
             See it on the map
           </button>
         </div>

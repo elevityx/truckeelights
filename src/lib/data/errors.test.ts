@@ -32,7 +32,26 @@ describe('toDataError', () => {
   });
 });
 
+describe('photo error codes', () => {
+  it.each(['photo_expired', 'upload_missing', 'not_pending', 'not_approved', 'invalid_image', 'photos_closed'])(
+    'maps a message equal to %s',
+    (code) => {
+      expect(toDataError({ message: code }).code).toBe(code);
+    },
+  );
+});
+
 describe('userMessage', () => {
+  it.each([
+    ['photo_expired', 'That upload took too long. Try again.'],
+    ['upload_missing', 'That upload took too long. Try again.'],
+    ['invalid_image', "That photo couldn't be read. Try a different one."],
+    ['photos_closed', 'Adding photos opens soon.'],
+    ['not_pending', 'Someone already handled this photo. Refresh the list.'],
+    ['not_approved', 'Someone already handled this photo. Refresh the list.'],
+  ] as const)('has copy for %s', (code, msg) => {
+    expect(userMessage(new DataError(code))).toBe(msg);
+  });
   it('uses the region name for out_of_bounds', () => {
     expect(userMessage(new DataError('out_of_bounds'), 'Truckee')).toBe('That spot is outside the Truckee map area.');
   });

@@ -20,6 +20,7 @@ export interface RegionContext {
   year: number;
   submissionsOpen: boolean;
   wordmark: string;
+  photosOpen: boolean;
 }
 export interface Badge {
   kind: string;
@@ -69,9 +70,51 @@ export type DataErrorCode =
   | 'must_be_hidden'
   | 'invalid_input'
   | 'captcha_failed'
+  | 'photo_expired'
+  | 'upload_missing'
+  | 'not_pending'
+  | 'not_approved'
+  | 'invalid_image'
+  | 'photos_closed'
   | 'auth_failed'
   | 'network'
   | 'unknown';
+export type PhotoStatus = 'reserved' | 'expired' | 'pending' | 'approved' | 'rejected' | 'revoked';
+export interface HousePhoto {
+  id: string;
+  url: string; // signed URL, 1 h
+}
+export type ConfirmResult = 'pending' | 'over_cap';
+export interface AddPhotosProgress {
+  index: number;
+  total: number;
+  stage: 'resizing' | 'uploading' | 'done' | 'failed';
+  error?: DataErrorCode;
+}
+export interface AddPhotosResult {
+  pending: number;
+  overCap: number;
+  failed: number;
+}
+export interface AdminPhoto {
+  id: string;
+  houseId: string;
+  address: string;
+  status: 'pending' | 'approved';
+  uploadPath: string | null;
+  publicPath: string | null;
+  createdAt: string;
+}
+export interface StorageJob {
+  id: number;
+  kind: 'delete_upload' | 'delete_public' | 'rotate_public';
+  bucket: 'photo-uploads' | 'photos';
+  objectName: string;
+  newObjectName: string | null;
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+}
 export class DataError extends Error {
   constructor(
     public code: DataErrorCode,
