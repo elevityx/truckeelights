@@ -47,7 +47,10 @@ function classify(r) {
   const d = r.err.match(/DETAIL:\s+(\S+)/);
   return m ? `${m[1]}${d ? `/${d[1]}` : ''}` : `unknown:${r.code}:${r.err.slice(0, 200)}`;
 }
-const claims = (uid, extra = {}) => JSON.stringify({ sub: uid, role: 'authenticated', is_anonymous: true, aal: 'aal1', ...extra });
+// amr shapes as GoTrue emits them (captured by tests/storage/50_admin_amr.test.mjs); admins need password + TOTP.
+const AMR_ANON = JSON.parse('[{"method":"anonymous","timestamp":1791564302}]');
+const AMR_ADMIN = JSON.parse('[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]');
+const claims = (uid, extra = {}) => JSON.stringify({ sub: uid, role: 'authenticated', is_anonymous: true, aal: 'aal1', amr: AMR_ANON, ...extra });
 const tx = (claimsJson, headers, body) => `begin;
 set local role authenticated;
 select set_config('request.jwt.claims', ${lit(claimsJson)}, true) is not null;
@@ -56,7 +59,7 @@ ${body}
 commit;`;
 const vote = (uid, house, ip = null, photo = null) => psql(tx(claims(uid), ip ? { 'cf-connecting-ip': ip } : {},
   `select 'OK|' || total_votes || '|' || left_today from public.vote_house(${lit(house)}, ${photo ? lit(photo) : 'null'});`));
-const voidAll = (house) => psql(tx(claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2' }), {},
+const voidAll = (house) => psql(tx(claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2', amr: AMR_ADMIN }), {},
   `select 'VOID|' || public.admin_void_votes(${lit(house)}, null, null);`));
 
 /** Run thunks with at most `n` in flight; results in input order. */
@@ -285,7 +288,7 @@ test('AC37b: admin_set_season(rehearsal) racing 15 photo-heart votes -> no 40P01
   const rid = await rehearsalReady();
   const { houses, photos } = await rehearsalHouses(rid);
   const thunks = Array.from({ length: 15 }, (_, i) => () => vote(uuid(), houses[i % 3], v6(12000 + i), photos[i % 3]));
-  thunks.splice(4, 0, () => psql(tx(claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2' }), {},
+  thunks.splice(4, 0, () => psql(tx(claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2', amr: AMR_ADMIN }), {},
     `select public.admin_set_season(${lit(rid)}, 'christmas', 2026, false);`)));
   const res = await pool(thunks);
   const season = res[4];
@@ -305,7 +308,7 @@ test('AC37b: admin_set_season(rehearsal) racing 15 photo-heart votes -> no 40P01
 // Deterministic, no timing races: one session holds its transaction open in pg_sleep, a second session is
 // started only after the first is provably holding, and we poll pg_stat_activity for the second to be
 // waiting on a lock. Then both finish and we check the committed outcome.
-const ADMIN2 = () => claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2' });
+const ADMIN2 = () => claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2', amr: AMR_ADMIN });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(sqlText, what, tries = 100) {
   for (let i = 0; i < tries; i += 1) { if ((await qn(sqlText)) > 0) return; await sleep(50); }

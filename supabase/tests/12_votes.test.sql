@@ -65,7 +65,10 @@ create function test_helpers.h(n int) returns uuid language sql immutable as $$
 create function test_helpers.claims(p_uid uuid, p_anon boolean default true, p_aal text default 'aal1') returns void language sql as $$
   select set_config('request.jwt.claims',
     case when p_uid is null then '' else
-      json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal)::text end, true)::text $$;
+      json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal,
+                      'amr', (case when p_aal = 'aal2' then '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'
+                       when p_anon then '[{"method":"anonymous","timestamp":1791564302}]'
+                       else '[{"method":"password","timestamp":1791564302}]' end)::json)::text end, true)::text $$;
 create function test_helpers.hdr(p text) returns void language sql as $$
   select set_config('request.headers', coalesce(p, ''), true)::text $$;
 -- "message/detail" of the error a statement raises, or 'ok'.

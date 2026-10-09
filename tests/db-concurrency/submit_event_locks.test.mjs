@@ -63,7 +63,9 @@ async function waitForWaiters(n) {
   throw new Error(`expected ${n} sessions waiting on the region advisory lock`);
 }
 
-const claims = (uid) => JSON.stringify({ sub: uid, role: 'authenticated', is_anonymous: true, aal: 'aal1' });
+// amr shape as GoTrue emits it for an anonymous session (captured by tests/storage/50_admin_amr.test.mjs).
+const AMR_ANON = JSON.parse('[{"method":"anonymous","timestamp":1791564302}]');
+const claims = (uid) => JSON.stringify({ sub: uid, role: 'authenticated', is_anonymous: true, aal: 'aal1', amr: AMR_ANON });
 const runId = () => crypto.randomBytes(3).toString('hex');
 let region; let startsAt;
 const users = [];
