@@ -20,7 +20,7 @@ vi.mock('@/lib/supabase/client', () => ({
   }),
 }));
 
-const { listMapHouses } = await import('./public');
+const { listMapHouses, subscribeCapability } = await import('./public');
 
 const H = { id: 'h1', address: '1 A St, Truckee', lat: 39.3, lng: -120.2 };
 
@@ -64,5 +64,16 @@ describe('listMapHouses (AC22)', () => {
   it('still throws other errors', async () => {
     state.houses = () => ({ data: null, error: { message: 'forbidden' } });
     await expect(listMapHouses('r1')).rejects.toMatchObject({ code: 'forbidden' });
+  });
+});
+
+describe('subscribeCapability', () => {
+  it('is undefined when the key is missing (DB without subscriptions) and strict about open', () => {
+    expect(subscribeCapability(undefined)).toBeUndefined();
+    expect(subscribeCapability(null)).toBeUndefined();
+    expect(subscribeCapability([])).toBeUndefined();
+    expect(subscribeCapability({})).toEqual({ open: false });
+    expect(subscribeCapability({ open: 'true' })).toEqual({ open: false });
+    expect(subscribeCapability({ open: true })).toEqual({ open: true });
   });
 });

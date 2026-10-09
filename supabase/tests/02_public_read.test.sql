@@ -40,7 +40,7 @@ select is((public.get_region_context(null) ->> 'year')::int, 2026, 'active year 
 select is(public.get_region_context(null) ->> 'wordmark', 'Truckee Frights', 'halloween wordmark');
 select is(
   (select array_agg(k order by k) from jsonb_object_keys(public.get_region_context(null)) k),
-  array['events', 'photos_open', 'region', 'season', 'submissions_open', 'votes_open', 'wordmark', 'year'], 'context has the contract keys (R2 adds photos_open, votes add votes_open, Events adds events)');
+  array['events', 'photos_open', 'region', 'season', 'submissions_open', 'subscribe', 'votes_open', 'wordmark', 'year'], 'context has the contract keys (R2 adds photos_open, votes add votes_open, Events adds events, Subscribe adds subscribe)');
 select is(
   (select array_agg(k order by k) from jsonb_object_keys(public.get_region_context(null) -> 'region') k),
   array['center_lat', 'center_lng', 'country_code', 'default_zoom', 'id', 'max_lat', 'max_lng', 'min_lat',

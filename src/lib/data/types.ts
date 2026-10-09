@@ -228,6 +228,6 @@ export interface DigestToday {
   sent: number; // digest emails sent today (UTC day)
   failed: number;
   cap: number; // digest send cap per day
-  providerDailyLimit: number; // 100 on the free plan; the banner warns at 80%
+  providerDailyLimit: number; // the email provider's daily limit (100); the banner warns at 80%
   capHit: boolean;
 }
