@@ -66,11 +66,28 @@ export function saveStops(key: string, stops: readonly Stop[], storage: StorageG
   }
 }
 
-/** Drop stops that are no longer public (hidden, released, ended). */
-export function pruneStops(stops: readonly Stop[], live: { houses: ReadonlySet<string>; events: ReadonlySet<string> }): { stops: Stop[]; dropped: number } {
-  const kept = stops.filter((s) => (s.kind === 'house' ? live.houses : live.events).has(s.id));
+/**
+ * Drop stops that are no longer public (hidden, released, ended). A `null` set means that kind could not be loaded, so its
+ * stops are kept: only a successful load is authoritative.
+ */
+export function pruneStops(
+  stops: readonly Stop[],
+  live: { houses: ReadonlySet<string> | null; events: ReadonlySet<string> | null },
+): { stops: Stop[]; dropped: number } {
+  const kept = stops.filter((s) => {
+    const set = s.kind === 'house' ? live.houses : live.events;
+    return set === null || set.has(s.id);
+  });
   return { stops: kept, dropped: stops.length - kept.length };
 }
+
+/** A new visible order, plus any saved stops that are not shown right now (their source is unavailable). Never over the cap. */
+export function withHidden(current: readonly Stop[], visibleOrder: readonly Stop[]): Stop[] {
+  return cleanStops([...visibleOrder, ...current.filter((c) => !visibleOrder.some((v) => sameStop(v, c)))]);
+}
+
+/** Append stops to the latest route; duplicates and anything past MAX_STOPS are dropped. */
+export const appendStops = (current: readonly Stop[], add: readonly Stop[]): Stop[] => cleanStops([...current, ...add]);
 
 export const droppedToast = (n: number) => (n === 1 ? '1 stop is no longer on the map' : `${n} stops are no longer on the map`);
 

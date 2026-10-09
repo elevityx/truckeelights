@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { captureFocus } from './focusRestore';
 
 interface Props {
   label: string;
@@ -29,6 +30,7 @@ export default function Sheet({ label, onClose, children, tall = false, trap = f
   });
 
   useEffect(() => {
+    const restoreFocus = captureFocus(document);
     const heading = ref.current?.querySelector<HTMLElement>('h1,h2,h3');
     if (heading) {
       heading.tabIndex = -1;
@@ -51,7 +53,10 @@ export default function Sheet({ label, onClose, children, tall = false, trap = f
       }
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      restoreFocus();
+    };
   }, []);
 
   return (

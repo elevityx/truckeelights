@@ -13,6 +13,8 @@ import {
   saveStops,
   shareDecision,
   toggleStop,
+  appendStops,
+  withHidden,
   type Stop,
 } from './stops';
 
@@ -142,5 +144,36 @@ describe('nearbyHouses', () => {
     expect(got[0].id).toBe(uid(11));
     const few = nearbyHouses([at(1, 0.005), at(2, 0.001), at(3, 0.02)], center, new Set());
     expect(few.map((h) => h.id)).toEqual([uid(2), uid(1)]);
+  });
+});
+
+describe('degraded loads never prune', () => {
+  const houses = new Set([uid(1)]);
+  it('keeps every event stop when events failed to load', () => {
+    const r = pruneStops([H(1), H(9), E(2), E(3)], { houses, events: null });
+    expect(r).toEqual({ stops: [H(1), E(2), E(3)], dropped: 1 });
+  });
+  it('keeps house stops when houses are unavailable, and prunes events normally after a good load', () => {
+    expect(pruneStops([H(5), E(2)], { houses: null, events: new Set() })).toEqual({ stops: [H(5)], dropped: 1 });
+  });
+  it('an empty but successful events load still prunes', () => {
+    expect(pruneStops([E(2)], { houses, events: new Set() })).toEqual({ stops: [], dropped: 1 });
+  });
+});
+
+describe('late location answers', () => {
+  it('append respects the latest route and the cap (20 stops, 5 added while pending)', () => {
+    const latest = Array.from({ length: 25 }, (_, i) => H(i + 1));
+    const out = appendStops(latest, [H(100), H(101)]);
+    expect(out).toHaveLength(MAX_STOPS);
+    expect(out).toEqual(latest);
+  });
+  it('append skips duplicates already added meanwhile', () => {
+    expect(appendStops([H(1), H(2)], [H(2), H(3)])).toEqual([H(1), H(2), H(3)]);
+  });
+  it('reorder does not resurrect a stop removed meanwhile, and keeps hidden stops', () => {
+    // Latest route: H1, E7 (event source down, so hidden), H3. H2 was removed while pending.
+    const latest = [H(1), E(7), H(3)];
+    expect(withHidden(latest, [H(3), H(1)])).toEqual([H(3), H(1), E(7)]);
   });
 });

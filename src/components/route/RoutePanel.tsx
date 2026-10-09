@@ -136,7 +136,7 @@ export default function RoutePanel({ route, season, year, onClose }: Props) {
               {route.busy === 'nearby' ? 'Finding you…' : 'Nearby houses'}
             </button>
           </div>
-          <p className="fine">Order for me and Nearby houses ask for your location once. It stays on your phone.</p>
+          <p className="fine">Order for me and Nearby houses ask for your location once. Otherwise it is used only on your phone, and we never store it. Starting your route sends the stop coordinates (and your location, if you shared it) to Google Maps.</p>
         </div>
 
         {n > 0 && (

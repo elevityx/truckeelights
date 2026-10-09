@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { publicEnv } from '@/config/public-env';
 import type { PinView, PublicEvent, Season } from '@/lib/data/types';
 import { firstSegment } from '@/lib/text/address';
@@ -10,6 +10,8 @@ import { orderStops } from '@/lib/route/order';
 import {
   MAX_STOPS,
   NEARBY_MAX,
+  appendStops,
+  cleanStops,
   ROUTE_PARAM,
   droppedToast,
   loadStops,
@@ -22,6 +24,7 @@ import {
   saveStops,
   shareDecision,
   toggleStop,
+  withHidden,
   type Stop,
   type StopKind,
 } from '@/lib/route/stops';
@@ -75,7 +78,9 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
   const keyRef = useRef<string | null>(null);
   const stopsRef = useRef<Stop[]>([]);
 
-  const commit = useCallback((next: Stop[]) => {
+  // The cap and shape are enforced here, so no caller (including a late geolocation answer) can exceed them.
+  const commit = useCallback((raw: Stop[]) => {
+    const next = cleanStops(raw);
     stopsRef.current = next;
     setStops(next);
     if (keyRef.current) saveStops(keyRef.current, next, localStore);
@@ -83,13 +88,24 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
 
   /**
    * Call once the season's houses and events are loaded. Restores the saved route (dropping stops that are no longer
-   * public) and reads a shared `?route=` link. Returns true when the route panel should open.
+   * public) and reads a shared `?route=` link. `loaded` says which kinds were fetched successfully: stops of a kind that
+   * failed to load are kept, never pruned. Returns true when the route panel should open.
    */
   const init = useCallback(
-    (s: Season, y: number, livePins: PinView[], liveEvents: PublicEvent[], search: string): boolean => {
+    (
+      s: Season,
+      y: number,
+      livePins: PinView[],
+      liveEvents: PublicEvent[],
+      search: string,
+      loaded: { houses: boolean; events: boolean } = { houses: true, events: true },
+    ): boolean => {
       keyRef.current = routeKey(s, y);
       setMode(defaultMode(s));
-      const live = { houses: new Set(livePins.map((p) => p.id)), events: new Set(liveEvents.map((e) => e.id)) };
+      const live = {
+        houses: loaded.houses ? new Set(livePins.map((p) => p.id)) : null,
+        events: loaded.events ? new Set(liveEvents.map((e) => e.id)) : null,
+      };
       const saved = pruneStops(loadStops(keyRef.current, localStore), live);
       commit(saved.stops);
       if (saved.dropped > 0) toast(droppedToast(saved.dropped));
@@ -149,6 +165,11 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
     return out;
   }, [stops, pins, events]);
 
+  const viewsRef = useRef<RouteStopView[]>([]);
+  useEffect(() => {
+    viewsRef.current = views;
+  }, [views]);
+
   /** Asks for location once per visit; later calls reuse the answer. */
   const locate = useCallback(async (): Promise<Point | null> => {
     if (geo.status === 'ok') return geo.p;
@@ -159,25 +180,27 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
   }, [geo]);
 
   const order = useCallback(async () => {
-    if (views.length < 2) return;
+    if (viewsRef.current.length < 2) return;
     setBusy('order');
     const p = await locate();
     setBusy(null);
-    const cur = views; // order what's on the map, in the current order
+    // Order the route as it is now, not as it was when the location request started.
+    const cur = viewsRef.current;
+    if (cur.length < 2) return;
     const idx = orderStops(cur, p);
-    commit(idx.map((i) => ({ kind: cur[i].kind, id: cur[i].id })));
+    commit(withHidden(stopsRef.current, idx.map((i) => ({ kind: cur[i].kind, id: cur[i].id }))));
     toast(p ? 'Ordered from your location' : 'Ordered from your first stop');
-  }, [views, locate, commit, toast]);
+  }, [locate, commit, toast]);
 
   const nearby = useCallback(async () => {
-    const room = MAX_STOPS - stopsRef.current.length;
-    if (room <= 0) {
-      toast(`Your route is full (${MAX_STOPS} stops).`);
-      return;
-    }
+    const full = () => toast(`Your route is full (${MAX_STOPS} stops).`);
+    if (stopsRef.current.length >= MAX_STOPS) return full();
     setBusy('nearby');
     const p = await locate();
     setBusy(null);
+    // Capacity and duplicates come from the route as it is now; edits made while location was pending count.
+    const room = MAX_STOPS - stopsRef.current.length;
+    if (room <= 0) return full();
     const center = p ?? mapCenter() ?? regionCenter;
     if (!center) return;
     const skip = new Set(stopsRef.current.filter((s) => s.kind === 'house').map((s) => s.id));
@@ -187,13 +210,13 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
       toast(`No more houses within 1 km of ${where}`);
       return;
     }
-    commit([...stopsRef.current, ...add.map((h) => ({ kind: 'house' as const, id: h.id }))]);
+    commit(appendStops(stopsRef.current, add.map((h) => ({ kind: 'house' as const, id: h.id }))));
     toast(`Added ${add.length} nearby ${add.length === 1 ? 'house' : 'houses'} (within 1 km of ${where})`);
   }, [locate, mapCenter, regionCenter, pins, commit, toast]);
 
   const move = useCallback(
     (i: number, dir: -1 | 1) => {
-      commit(moveStop(views, i, dir).map((v) => ({ kind: v.kind, id: v.id })));
+      commit(withHidden(stopsRef.current, moveStop(views, i, dir).map((v) => ({ kind: v.kind, id: v.id }))));
     },
     [views, commit],
   );

@@ -123,7 +123,7 @@ export default function HomePage() {
         setLayer(startLayer);
         if (evError) showToast("Couldn't load events. Houses are still here.");
         // Build my route: restore the saved stops (dropping any no longer public) and read a shared ?route= link.
-        const openRoute = routeInit(c.season, c.year, p, evs.filter((x) => notEnded(x, Date.now())), window.location.search);
+        const openRoute = routeInit(c.season, c.year, p, evs.filter((x) => notEnded(x, Date.now())), window.location.search, { houses: true, events: !evError });
         const h = q.get('house');
         const e = q.get('event');
         if (startLayer === 'events' && !h && !e) setFitEventsSeq((n) => n + 1);
