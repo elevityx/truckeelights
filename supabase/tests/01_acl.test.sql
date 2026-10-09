@@ -161,7 +161,7 @@ reset role;
 
 select set_config('request.jwt.claims',
   json_build_object('sub', 'a1000000-0000-4000-a000-000000000001', 'role', 'authenticated',
-                    'is_anonymous', false, 'aal', 'aal2')::text, true);
+                    'is_anonymous', false, 'aal', 'aal2', 'amr', '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'::json)::text, true);
 set local role authenticated;
 select throws_ok('select * from private.quota_events', '42501', null, 'authenticated: select private.quota_events -> 42501');
 select throws_ok($$insert into private.quota_events (kind, uid, region_id) values ('house', gen_random_uuid(), gen_random_uuid())$$,

@@ -42,7 +42,10 @@ create schema test_helpers;
 grant usage on schema test_helpers to anon, authenticated;
 create function test_helpers.claims(p_uid text, p_anon boolean, p_aal text) returns void language sql as $$
   select set_config('request.jwt.claims',
-    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal)::text, true)::text
+    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal,
+                      'amr', (case when p_aal = 'aal2' then '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'
+                       when p_anon then '[{"method":"anonymous","timestamp":1791564302}]'
+                       else '[{"method":"password","timestamp":1791564302}]' end)::json)::text, true)::text
 $$;
 -- "message/detail" of the error a statement raises, or 'ok'.
 create function test_helpers.err(q text) returns text language plpgsql as $$

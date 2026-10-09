@@ -38,7 +38,10 @@ create schema test_helpers;
 grant usage on schema test_helpers to anon, authenticated;
 create function test_helpers.claims(p_uid text, p_anon boolean, p_aal text) returns void language sql as $$
   select set_config('request.jwt.claims',
-    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal)::text, true)::text
+    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', p_anon, 'aal', p_aal,
+                      'amr', (case when p_aal = 'aal2' then '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'
+                       when p_anon then '[{"method":"anonymous","timestamp":1791564302}]'
+                       else '[{"method":"password","timestamp":1791564302}]' end)::json)::text, true)::text
 $$;
 grant execute on all functions in schema test_helpers to anon, authenticated;
 
@@ -55,9 +58,9 @@ select is(private.is_admin(current_setting('t.testville')::uuid), true, 'is_admi
 select is(private.is_admin(null), false, 'is_admin: region admin is not global');
 select test_helpers.claims('d4000000-0000-4000-a000-000000000001', false, 'aal2');
 select is(private.is_admin(current_setting('t.truckee')::uuid), true, 'is_admin: global admin at aal2 -> true');
-select set_config('request.jwt.claims', json_build_object('sub', 'd4000000-0000-4000-a000-000000000001', 'role', 'authenticated', 'aal', 'aal2')::text, true);
+select set_config('request.jwt.claims', json_build_object('sub', 'd4000000-0000-4000-a000-000000000001', 'role', 'authenticated', 'aal', 'aal2', 'amr', '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'::json)::text, true);
 select is(private.is_admin(current_setting('t.truckee')::uuid), false, 'is_admin: missing is_anonymous claim fails closed');
-select set_config('request.jwt.claims', json_build_object('sub', 'd4000000-0000-4000-a000-000000000001', 'role', 'authenticated', 'is_anonymous', false)::text, true);
+select set_config('request.jwt.claims', json_build_object('sub', 'd4000000-0000-4000-a000-000000000001', 'role', 'authenticated', 'is_anonymous', false, 'amr', '[{"method":"totp","timestamp":1791564301},{"method":"password","timestamp":1791564300}]'::json)::text, true);
 select is(private.is_admin(current_setting('t.truckee')::uuid), false, 'is_admin: missing aal claim fails closed');
 
 -- ---------------------------------------------------------------- every admin RPC is forbidden for non-admin callers

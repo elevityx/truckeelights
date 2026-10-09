@@ -38,7 +38,7 @@ language sql as $$
 $$;
 create function test_helpers.as_user(p_uid text) returns void language sql as $$
   select set_config('request.jwt.claims',
-    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', true, 'aal', 'aal1')::text, true)::text
+    json_build_object('sub', p_uid, 'role', 'authenticated', 'is_anonymous', true, 'aal', 'aal1', 'amr', '[{"method":"anonymous","timestamp":1791564302}]'::json)::text, true)::text
 $$;
 grant execute on all functions in schema test_helpers to anon, authenticated;
 
