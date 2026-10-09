@@ -21,7 +21,7 @@ Note: `next dev` may rewrite this file (Next.js agent-docs injection). Revert an
 ```bash
 nvm use            # Node version from .nvmrc
 npm ci
-npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, or NEXT_PUBLIC_EVENTS_MOCK=1 to preview events, without the database (dev only)
+npm run dev        # add NEXT_PUBLIC_PHOTOS_MOCK=1 to preview photo flows, NEXT_PUBLIC_VOTES_MOCK=1 to preview voting, NEXT_PUBLIC_EVENTS_MOCK=1 to preview events, or NEXT_PUBLIC_SUBSCRIBE_MOCK=1 to preview Subscribe, sign-in and /account/ (options in src/components/subscribe/subscribeDevMock.ts), without the database (dev only)
 npm run build      # static export to out/
 npm run lint
 npm run typecheck
@@ -37,13 +37,14 @@ Local env: copy `.env.example` to `.env.local`. It holds the `NEXT_PUBLIC_*` val
 The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_SECRET` through `supabase/config.toml`. `supabase/start-local.sh` (via `npm run db:start`) defaults them to `http://localhost:3000` and Cloudflare's public always-pass test secret. Never put a real captcha secret in the repo.
 
 ## Layout
-- `src/app` (pages: `/` map, `/about/` static About + FAQ, `/flyer/` and `/admin/` noindex), `src/components`
+- `src/app` (pages: `/` map, `/about/` static About + FAQ, `/privacy/` static, `/flyer/` and `/admin/` noindex; Subscribe v1 adds noindex `/account/`, `/auth/confirm/`, `/subscribed/`, `/unsubscribe/`), `src/components`
 - `src/lib/seo` (JSON-LD builders). `public/sitemap.xml` and `public/robots.txt` are hand-written: add every new indexable page to the sitemap, and keep `/admin/` and `/flyer/` out of it.
 - `src/lib/data` (the **only** Supabase caller; subscriptions/accounts: `account.ts` (account RPC wrappers) and `adminAccounts.ts` (claims queue, counts, digest banner, `subscribe_open`); events: `events.ts` public read/submit + `eventBounds` (local box, visitor submissions) and `eventBoundsAdmin` (admin box incl. Reno, admin writes and the map camera), `adminEvents.ts` moderation)
 - `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
 - `src/components/photos` (visitor photo upload sheet, `api.ts` data wiring, `devMock.ts` dev-only mock) and `src/components/house` (house sheet, photo strip, lightbox)
 - `src/components/list` (house list; below 1024px the list opens with `ListControls`, a row with the inline layer switch and the compact `SortMenu` button (pure state in `sortMenu.logic.ts`); at 1024+ the sort button sits in the houses heading)
 - `src/components/events` (Events v1 public UI: the Houses · Events · Both layer switch (`?layer=`, `localStorage` key `tl:layer`), event list views, event sheet (`?event=<id>`), Add chooser and event form; `api.ts` data wiring, `eventsDevMock.ts` dev-only mock). Shown only when `get_region_context` returns `events`; without it the client makes no events calls.
+- `src/components/subscribe` (Subscribe + Accounts v1 UI: Subscribe sheet, header menu, list footer, post-add nudge, and the `/account/`, `/auth/confirm/`, `/unsubscribe/` page apps; `flow.ts` (sheet state machine, `next` allowlist, confirm-type branches) and `accountState.ts` are pure and tested; `api.ts` data wiring, `subscribeDevMock.ts` dev-only mock). Every entry point is shown only when `get_region_context` returns `subscribe.open`. Sign-in is email OTP only (`src/lib/data/auth.ts`: `signInWithOtp` with Turnstile, `verifyOtp` by code or by `token_hash` after a Confirm tap, never on load; never `updateUser({ email })`); `begin_house_link` only when the session JWT says `is_anonymous`; an unchecked account box ends with `signOut({ scope: 'local' })`. `src/lib/data/emailLinks.ts` calls the `unsubscribe` Edge Function with the emailed token.
 - `src/lib/time` (`pacific.ts`: wall-clock conversion in the region's zone with `Intl`, never the device zone; DST gap rejected, fall-back hour takes daylight time; list grouping)
 - `src/lib/maps` (adapter; event pins are a constant glyph plus `textContent` labels; the map's camera restriction comes from `eventBoundsAdmin` in `src/lib/data/events.ts`, the TS mirror of SQL `private.event_bounds_admin`, next to `eventBounds`, the mirror of `private.event_bounds`; the initial camera stays on the region), `src/lib/theme`, `src/lib/text` (pure address helpers), `src/config/public-env.ts`
 - `src/components/admin` (admin back office at `/admin/`; the Events tab is `EventsTab.tsx` with pure helpers and tests in `eventsState.ts`, wired to `src/lib/data/adminEvents.ts`)

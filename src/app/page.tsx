@@ -20,6 +20,11 @@ import HomeIntro from '@/components/home/HomeIntro';
 import Header from '@/components/shell/Header';
 import { ListIcon, MapIcon } from '@/components/shell/Icons';
 import Toast from '@/components/shell/Toast';
+import { devSubscribeFixture, devSubscribeOverlay } from '@/components/subscribe/api';
+import HeaderMenu from '@/components/subscribe/HeaderMenu';
+import { AccountNudge, ListSubscribeFooter } from '@/components/subscribe/Nudges';
+import SubscribeSheet from '@/components/subscribe/SubscribeSheet';
+import Sheet from '@/components/ui/Sheet';
 import { publicEnv, supabaseConfigured } from '@/config/public-env';
 import {
   getRegionContext,
@@ -44,7 +49,8 @@ export default function HomePage() {
   const [pins, setPins] = useState<PinView[]>([]);
   const [view, setView] = useState<'map' | 'list'>('map');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | null>(null);
+  const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | 'subscribe' | 'nudgePreview' | null>(null);
+  const [subAccount, setSubAccount] = useState<boolean | undefined>(undefined); // Subscribe opened from the post-add nudge
   const [layer, setLayer] = useState<Layer>('houses');
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const eventsNow = useClock(); // advances ~every minute and on visibilitychange: grouping and expiry stay current
@@ -79,8 +85,10 @@ export default function HomePage() {
       try {
         // Dev mocks: null outside `next dev` with the events or votes mock.
         const efx = await devEventsFixture();
-        const fx = efx ?? (await devVotesFixture());
-        const c = fx?.ctx ?? (await getRegionContext());
+        const fx = efx ?? (await devVotesFixture()) ?? (await devSubscribeFixture());
+        let c = fx?.ctx ?? (await getRegionContext());
+        const sov = await devSubscribeOverlay(c); // dev mock only: subscribe capability + a sheet to open
+        if (sov) c = sov.ctx;
         if (cancelled) return;
         applySeason(c.season);
         const p = fx?.pins ?? (await listMapHouses(c.region.id));
@@ -114,6 +122,8 @@ export default function HomePage() {
           } else {
             showToast("That event isn't on the map.");
           }
+        } else if (sov?.open && c.subscribe?.open) {
+          setSheet(sov.open === 'nudge' ? 'nudgePreview' : 'subscribe');
         } else if (efx?.open && c.events) {
           setSheet(efx.open === 'event-form' ? 'addEvent' : 'chooser');
         } else if (h) {
@@ -194,6 +204,14 @@ export default function HomePage() {
   const mapPins = useMemo(() => (showsHouses(layer) ? pins : []), [layer, pins]);
   const mapEvents = useMemo(() => (showsEvents(layer) ? liveEvents : []), [layer, liveEvents]);
 
+  const subOpen = ctx?.subscribe?.open === true; // A missing or closed capability hides every Subscribe entry point.
+  const openSubscribe = (account?: boolean) => {
+    setSubAccount(account);
+    setSelectedId(null);
+    setEventId(null);
+    setSheet('subscribe');
+  };
+
   if (error) {
     return (
       <main className="err-page">
@@ -223,6 +241,7 @@ export default function HomePage() {
           setSheet(ctx.events ? 'chooser' : 'add');
         }}
         addChooser={ctx.events ? { eventsOpen: ctx.events.open } : undefined}
+        menu={subOpen ? <HeaderMenu onSubscribe={() => openSubscribe()} /> : undefined}
         layerSwitch={ctx.events && <LayerSwitch variant="bar" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
       />
       <div className="pbody">
@@ -267,6 +286,7 @@ export default function HomePage() {
               pins={pins}
               onOpen={select}
               layerSwitch={inlineSwitch}
+              after={subOpen ? <ListSubscribeFooter onSubscribe={() => openSubscribe()} /> : undefined}
               before={
                 ctx.events && layer === 'both' ? (
                   <UpcomingEvents
@@ -339,6 +359,7 @@ export default function HomePage() {
           pins={pins}
           onClose={() => setSheet(null)}
           onCreated={(id) => void reload(id)}
+          onCreateAccount={subOpen ? () => openSubscribe(true) : undefined}
           onOpenExisting={(id) => select(id)}
           onAddPhotos={
             ctx.photosOpen
@@ -359,6 +380,21 @@ export default function HomePage() {
             setSheet('house');
           }}
         />
+      )}
+      {sheet === 'subscribe' && subOpen && <SubscribeSheet key={String(subAccount)} ctx={ctx} account={subAccount} onClose={() => setSheet(null)} />}
+      {sheet === 'nudgePreview' && subOpen && (
+        // Dev mock only (?subMock=nudge): the add-house success card's nudge, without running the add flow.
+        <Sheet label="Add a house" onClose={() => setSheet(null)} tall>
+          <div className="sheet-in">
+            <div className="result">
+              <p className="disp">{ctx.season === 'halloween' ? 'It’s alive!' : 'Added!'}</p>
+              <p>
+                <strong>88 Lantern Ct, Truckee, CA 96161</strong> is on the map.
+              </p>
+              <AccountNudge onCreate={() => openSubscribe(true)} onDismiss={() => setSheet(null)} />
+            </div>
+          </div>
+        </Sheet>
       )}
       <Toast message={toast} />
     </>

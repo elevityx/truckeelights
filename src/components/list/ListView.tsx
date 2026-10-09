@@ -22,6 +22,8 @@ interface Props {
   before?: ReactNode;
   /** The inline Houses · Events · Both switch; below 1024px it opens the list in a control row next to the sort button. */
   layerSwitch?: ReactNode;
+  /** Shown after the houses (the Subscribe footer, while subscriptions are open). */
+  after?: ReactNode;
 }
 
 const SORT_KEY = 'listSort';
@@ -64,7 +66,7 @@ function VoteRow({ pin, season, rank, top3, onOpen }: { pin: PinView; season: Se
   );
 }
 
-export default function ListView({ season, year, pins, onOpen, before, layerSwitch }: Props) {
+export default function ListView({ season, year, pins, onOpen, before, layerSwitch, after }: Props) {
   const t = THEMES[season];
   const [sort, setSortState] = useState<Sort>(savedSort);
   const setSort = (s: Sort) => {
@@ -88,6 +90,7 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
         <div className="empty">
           <p className="disp">{t.empty}</p>
         </div>
+        {after && <div className="list-in">{after}</div>}
       </div>
     );
   }
@@ -152,6 +155,7 @@ export default function ListView({ season, year, pins, onOpen, before, layerSwit
             </section>
           ))
         )}
+        {after}
         <p className="land-ack">Truckee sits on the ancestral homeland of the Washoe (Wašiw) people.</p>
         <p className="vprivacy">{VOTE_PRIVACY}</p>
       </div>
