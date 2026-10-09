@@ -33,6 +33,8 @@ export interface SheetState {
 export const RESEND_SECONDS = 60;
 export const CHOICES_KEY = 'tl:sub-choices';
 export const ADDED_KEY = 'tl:added-house';
+/** sessionStorage: where a sign-in link should land when the emailed link has no `next` (the templates carry none). */
+export const NEXT_KEY = 'tl:auth-next';
 
 export function initialSheet(account: boolean, email = ''): SheetState {
   return {
@@ -252,6 +254,42 @@ export function nextFor(choices: Choices | null, raw: string | null | undefined)
   if (n !== '/') return n;
   if (!choices) return '/';
   return choices.account ? '/account/' : '/subscribed/';
+}
+
+/**
+ * The Auth templates link to `/auth/confirm/?token_hash=…&type=…` with no `next` (C3: `{{ .SiteURL }}` only), so the
+ * page that sent the email records where its link should land, in this browser's sessionStorage. Only allowed paths.
+ */
+export function saveNext(store: () => Store, next: NextPath): void {
+  try {
+    if (next === '/') store().removeItem(NEXT_KEY);
+    else store().setItem(NEXT_KEY, next);
+  } catch {
+    /* storage may be unavailable: the confirm page falls back to the choices or '/' */
+  }
+}
+
+export function readNext(store: () => Store): NextPath | null {
+  try {
+    const n = safeNext(store().getItem(NEXT_KEY));
+    return n === '/' ? null : n;
+  } catch {
+    return null;
+  }
+}
+
+export function clearNext(store: () => Store): void {
+  try {
+    store().removeItem(NEXT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** The link's own `next` when it is an allowed path, else the one this browser recorded, else null. */
+export function confirmNext(raw: string | null | undefined, store: () => Store): NextPath | null {
+  const n = safeNext(raw);
+  return n !== '/' ? n : readNext(store);
 }
 
 export type ConfirmBranch = 'signin' | 'email_change' | 'recovery';

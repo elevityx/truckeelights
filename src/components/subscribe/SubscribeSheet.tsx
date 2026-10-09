@@ -16,6 +16,7 @@ import {
   initialSheet,
   reducer,
   saveChoices,
+  saveNext,
   saveMessage,
   sendCode,
   sendMessage,
@@ -93,6 +94,7 @@ export default function SubscribeSheet({ ctx, onClose, account }: Props) {
     }
     // Keep the choices for the confirm page in case the person taps the emailed link instead (B2).
     saveChoices(session, s.choices);
+    saveNext(session, s.choices.account ? '/account/' : '/subscribed/');
     dispatch({ type: 'submit', signedIn: false });
   };
 

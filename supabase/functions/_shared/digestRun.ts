@@ -1,7 +1,12 @@
-// The send loop for one run kind. Per (run, user): claim a `sending` row, call Resend with Idempotency-Key
-// run_id:user_id, then record `sent` (which advances last_sent_through in the database) or `failed` with a short code.
-// Assumes svc_digest_pending returns only subscribers with something new and no `sent` row for this run.
-// A rerun skips anything already `sent`, stops at the daily cap, and logs only counts and ids.
+// The send loop for one run kind (C8). The database owns the ledger and the cap:
+//   svc_digest_start   -> the run for (kind, Pacific date); a same-day rerun resumes it with the same window
+//   svc_digest_batch   -> claims recipients with something new as `sending`, stops at app_settings.digest_daily_cap
+//   (Resend, with Idempotency-Key = the row's run_id:user_id)
+//   svc_digest_mark    -> 2xx: `sent`, advancing last_sent_through; else `failed` with a short code (the window is not
+//                         advanced, so the next run picks the same items up again)
+//   svc_digest_finish  -> totals and cap_hit
+// A rerun never re-sends a `sent` row, and a crash between Resend and the mark is retried with the same key.
+// Logs only counts and ids.
 import type { Cadence, DigestDb, DigestRecipient } from './db.ts';
 import { renderDigest } from './digestEmail.ts';
 import { sendEmail, type OutgoingEmail, type SendResult, type Sleep } from './resend.ts';
@@ -17,7 +22,6 @@ export interface RunConfig {
   from: string;
   hmacSecret: string;
   resendKey: string;
-  dailyCap: number;
   paceMs: number;
   now: () => Date;
 }
@@ -39,11 +43,12 @@ export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<Ou
   const oneClick = `${cfg.functionsUrl}/unsubscribe?t=${encodeURIComponent(unsubToken)}`;
   const rendered = renderDigest({
     houses: r.houses ?? [], events: r.events ?? [],
-    housesTotal: r.houses_total ?? 0, eventsTotal: r.events_total ?? 0,
+    housesTotal: r.house_total ?? 0, eventsTotal: r.event_total ?? 0,
     siteUrl: cfg.siteUrl,
     unsubUrl: `${cfg.siteUrl}/unsubscribe/?t=${encodeURIComponent(unsubToken)}`,
     prefsUrl: `${cfg.siteUrl}/unsubscribe/?t=${encodeURIComponent(prefsToken)}`,
     cadence: r.cadence,
+    timezone: r.timezone,
   });
   if (!rendered) return null;
   return {
@@ -63,34 +68,38 @@ export async function runDigest(kind: Cadence, runDate: string, cfg: RunConfig, 
   const log = deps.log ?? (() => {});
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const send = deps.send ?? ((key: string, email: OutgoingEmail) => sendEmail(cfg.resendKey, key, email, { sleep }));
-  const { run_id: runId, sent_today: sentToday } = await deps.db.beginRun(kind, runDate);
+  const runId = await deps.db.start(kind, runDate);
   const summary: RunSummary = { kind, sent: 0, failed: 0, skipped: 0, capHit: false };
-  let remaining = cfg.dailyCap - sentToday;
   const seen = new Set<string>();
 
-  outer: while (true) {
-    if (remaining <= 0) { summary.capHit = true; log(`digest_cap_hit run=${runId}`); break; }
-    const chunk = await deps.db.pending(runId, Math.min(CHUNK, remaining));
+  while (true) {
+    const chunk = await deps.db.batch(runId, CHUNK);
     const fresh = chunk.filter((r) => !seen.has(r.user_id));
-    if (fresh.length === 0) break; // nothing left, or only rows we already handled (never loop)
+    if (fresh.length === 0) break; // nothing left (or the cap is reached), or only rows already handled: never loop
     for (const r of fresh) {
       seen.add(r.user_id);
-      if (remaining <= 0) { summary.capHit = true; log(`digest_cap_hit run=${runId}`); break outer; }
       const email = await buildEmail(r, cfg);
-      if (!email) { summary.skipped++; continue; } // nothing new for this person: no row, no send
-      if (!(await deps.db.claim(runId, r.user_id))) { summary.skipped++; continue; } // already sent in this run
-      const res = await send(`${runId}:${r.user_id}`, email);
+      if (!email) {
+        // The SQL returns only people with something new, so this means malformed content. Release the claim as a
+        // failure (the window stays put; the next run tries again) rather than leaving it `sending`.
+        await deps.db.mark(runId, r.user_id, false, 'empty_render');
+        summary.skipped++;
+        continue;
+      }
+      const res = await send(r.idempotency_key, email);
       if (res.ok) {
-        await deps.db.mark(runId, r.user_id, 'sent', res.id, null, r.window_through);
-        summary.sent++; remaining--;
+        await deps.db.mark(runId, r.user_id, true, null);
+        summary.sent++;
       } else {
-        await deps.db.mark(runId, r.user_id, 'failed', null, res.code, null);
+        await deps.db.mark(runId, r.user_id, false, res.code);
         summary.failed++;
       }
       if (cfg.paceMs > 0) await sleep(cfg.paceMs);
     }
   }
-  await deps.db.finishRun(runId, summary.sent, summary.failed, summary.capHit);
+  const totals = await deps.db.finish(runId);
+  summary.capHit = totals.cap_hit === true;
+  if (summary.capHit) log(`digest_cap_hit run=${runId}`);
   log(`digest_run kind=${kind} run=${runId} sent=${summary.sent} failed=${summary.failed} skipped=${summary.skipped} cap_hit=${summary.capHit}`);
   return summary;
 }

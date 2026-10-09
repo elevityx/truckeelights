@@ -52,8 +52,8 @@ export async function handle(req: Request, deps: UnsubDeps): Promise<Response> {
     }
     if (claims.purpose !== 'prefs') return json(403, { error: 'forbidden' }, cors); // preferences need a prefs link
     if (action === 'get') {
-      const p = await deps.db.lookup(claims.publicId);
-      if (!p || p.token_version !== claims.version) return json(410, { error: 'token_invalid' }, cors);
+      const p = await deps.db.lookup(claims.publicId, claims.version); // null for an unknown id or a bumped version
+      if (!p) return json(410, { error: 'token_invalid' }, cors);
       return json(200, { status: p.status, houses: p.houses, events: p.events, cadence: p.cadence }, cors);
     }
     if (action === 'set') {
@@ -62,7 +62,7 @@ export async function handle(req: Request, deps: UnsubDeps): Promise<Response> {
         return json(400, { error: 'invalid_input' }, cors);
       }
       const r = await deps.db.setPrefs(claims.publicId, claims.version, houses, events, cadence as Cadence);
-      return r === 'ok' ? json(200, { status: 'saved' }, cors) : json(410, { error: 'token_invalid' }, cors);
+      return r === 'updated' ? json(200, { status: 'saved' }, cors) : json(410, { error: 'token_invalid' }, cors);
     }
     return json(400, { error: 'invalid_input' }, cors);
   } catch {

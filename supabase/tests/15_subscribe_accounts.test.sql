@@ -6,7 +6,7 @@
 -- events.approved_at, and the svc_* routines (service_role only; digest idempotency and cap; unsubscribe; delete).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(153);
+select plan(157);
 
 -- ---------------------------------------------------------------- fixtures (as postgres)
 delete from public.admins;
@@ -469,6 +469,27 @@ reset role;
 select test_helpers.as_('admin1');
 set local role authenticated;
 select is((select row(sent, failed, cap_hit)::text from public.admin_digest_today()), '(1,1,t)', 'admin_digest_today reflects the day');
+reset role;
+-- C8 (integration): the failed person is handed out again by the NEXT run, with that run's key; and a crash between
+-- the provider call and the mark (a `sending` row older than 10 minutes) comes back with the SAME key.
+set local role service_role;
+select set_config('t.run3', public.svc_digest_start('daily', '2026-10-22')::text, true);
+reset role;
+update private.digest_runs set window_to = now() where run_id = current_setting('t.run3')::uuid;
+set local role service_role;
+select is((select string_agg(user_id::text || '|' || idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
+  'f5000000-0000-4000-a000-000000000001|' || current_setting('t.run3') || ':f5000000-0000-4000-a000-000000000001',
+  'C8: a failed row is retried on the next run (same window start, new run key)');
+reset role;
+update private.digest_sends set updated_at = now() - interval '11 minutes' where run_id = current_setting('t.run3')::uuid;
+set local role service_role;
+select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run3')::uuid, 100)),
+  current_setting('t.run3') || ':f5000000-0000-4000-a000-000000000001',
+  'C8: a stale sending row (crash between send and mark) is handed out again with the same idempotency key');
+reset role;
+select is((select attempts from private.digest_sends where run_id = current_setting('t.run3')::uuid), 2, 'C8: the retry is counted in attempts');
+set local role service_role;
+select is(public.svc_digest_mark(current_setting('t.run3')::uuid, 'f5000000-0000-4000-a000-000000000001', true, null), true, 'C8: the retried row can be marked sent');
 reset role;
 -- unsubscribe
 select set_config('t.pub', (select public_id::text from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), true);

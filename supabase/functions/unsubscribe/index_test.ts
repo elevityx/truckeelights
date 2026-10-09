@@ -1,5 +1,5 @@
 import { assertEquals } from '@std/assert';
-import type { Prefs, UnsubscribeDb } from '../_shared/db.ts';
+import type { Cadence, Prefs, UnsubscribeDb } from '../_shared/db.ts';
 import { PREFS_TTL_SECONDS, signToken } from '../_shared/token.ts';
 import { handle, type UnsubDeps } from './index.ts';
 
@@ -8,12 +8,25 @@ const PID = '11111111-2222-4333-8444-555555555555';
 const NOW = new Date('2026-12-05T02:07:00Z');
 const nowS = Math.floor(NOW.getTime() / 1000);
 
+// Mirrors svc_unsubscribe_* (20261016000200): lookup/stop/set_prefs match (public_id, token_version); stop works only on
+// an active row and bumps the version (killing every link); set_prefs works only on an active row.
 function fake(version = 1) {
-  const state: Prefs & { mutations: number } = { status: 'active', houses: true, events: false, cadence: 'daily', token_version: version, mutations: 0 };
+  const state = { status: 'active' as 'active' | 'stopped', houses: true, events: false, cadence: 'daily' as Cadence, token_version: version, mutations: 0 };
   const db: UnsubscribeDb = {
-    lookup: (id) => Promise.resolve(id === PID ? { ...state } : null),
-    stop: (id, v) => { if (id !== PID || v !== state.token_version) return Promise.resolve('invalid'); state.mutations++; state.status = 'stopped'; return Promise.resolve('stopped'); },
-    setPrefs: (id, v, h, e, c) => { if (id !== PID || v !== state.token_version) return Promise.resolve('invalid'); state.mutations++; Object.assign(state, { houses: h, events: e, cadence: c }); return Promise.resolve('ok'); },
+    lookup: (id, v): Promise<Prefs | null> =>
+      Promise.resolve(id === PID && v === state.token_version
+        ? { status: state.status, houses: state.houses, events: state.events, cadence: state.cadence, region_name: 'Truckee' }
+        : null),
+    stop: (id, v) => {
+      if (id !== PID || v !== state.token_version || state.status !== 'active') return Promise.resolve('invalid');
+      state.mutations++; state.status = 'stopped'; state.token_version++;
+      return Promise.resolve('stopped');
+    },
+    setPrefs: (id, v, h, e, c) => {
+      if (id !== PID || v !== state.token_version || state.status !== 'active') return Promise.resolve('invalid');
+      state.mutations++; Object.assign(state, { houses: h, events: e, cadence: c });
+      return Promise.resolve('updated');
+    },
   };
   const deps: UnsubDeps = { db, secret: SECRET, site: 'https://example.test', now: () => NOW };
   return { state, deps };
@@ -70,8 +83,10 @@ Deno.test('prefs: get and set need a prefs token; expired is 410; invalid input 
   assertEquals(state.mutations, 0);
   assertEquals((await handle(post(p, { action: 'set', houses: true, events: true, cadence: 'weekly' }, false), deps)).status, 200);
   assertEquals([state.houses, state.events, state.cadence], [true, true, 'weekly']);
-  // a prefs link can also stop
+  // a prefs link can also stop; stopping bumps the version, so the same link is dead afterwards
   assertEquals((await handle(post(p, { action: 'stop' }), deps)).status, 200);
+  assertEquals((await handle(post(p, { action: 'stop' }), deps)).status, 410);
+  assertEquals((await handle(post(p, { action: 'get' }), deps)).status, 410);
 });
 
 Deno.test('OPTIONS, other methods, and a missing secret', async () => {

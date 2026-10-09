@@ -18,6 +18,8 @@ export interface RenderInput extends DigestContent {
   unsubUrl: string;
   prefsUrl: string;
   cadence: 'daily' | 'weekly';
+  /** The region's IANA zone (from the digest row); falls back to Pacific. */
+  timezone?: string;
 }
 
 export interface Rendered { subject: string; html: string; text: string }
@@ -39,9 +41,11 @@ export function normalizeContent(c: DigestContent): DigestContent | null {
   };
 }
 
-export function formatPacific(iso: string): string {
+export function formatPacific(iso: string, timeZone: string = REGION_TZ): string {
+  let tz = REGION_TZ;
+  try { new Intl.DateTimeFormat('en-US', { timeZone }); tz = timeZone; } catch { /* unknown zone: keep Pacific */ }
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: REGION_TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   }).format(new Date(iso));
 }
 
@@ -85,7 +89,7 @@ export function renderDigest(input: RenderInput): Rendered | null {
   if (c.events.length > 0) {
     h.push('<tr><td style="font-size:16px;font-weight:700;padding:16px 0 4px">New events</td></tr>');
     for (const e of c.events) {
-      h.push(`<tr><td style="font-size:15px;padding:4px 0"><a href="${escapeHtml(eventUrl(e.id))}" style="color:#0b5cad">${escapeHtml(e.title)}</a><br><span style="font-size:13px;color:#4a463f">${escapeHtml(formatPacific(e.starts_at))}</span></td></tr>`);
+      h.push(`<tr><td style="font-size:15px;padding:4px 0"><a href="${escapeHtml(eventUrl(e.id))}" style="color:#0b5cad">${escapeHtml(e.title)}</a><br><span style="font-size:13px;color:#4a463f">${escapeHtml(formatPacific(e.starts_at, input.timezone))}</span></td></tr>`);
     }
     if (moreEvents > 0) h.push(`<tr><td style="font-size:14px;color:#4a463f;padding:4px 0">and ${moreEvents} more on the map</td></tr>`);
   }
@@ -102,7 +106,7 @@ export function renderDigest(input: RenderInput): Rendered | null {
   }
   if (c.events.length > 0) {
     t.push('NEW EVENTS');
-    for (const e of c.events) t.push(`- ${e.title} (${formatPacific(e.starts_at)})\n  ${eventUrl(e.id)}`);
+    for (const e of c.events) t.push(`- ${e.title} (${formatPacific(e.starts_at, input.timezone)})\n  ${eventUrl(e.id)}`);
     if (moreEvents > 0) t.push(`and ${moreEvents} more on the map`);
     t.push('');
   }

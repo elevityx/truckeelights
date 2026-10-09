@@ -7,11 +7,12 @@ import type { DataErrorCode } from '@/lib/data/types';
 import { subscribeApi, type SubscribeApi } from './api';
 import {
   clearChoices,
+  clearNext,
+  confirmNext,
   finishSubscription,
   nextFor,
   parseConfirm,
   readChoices,
-  safeNext,
   saveMessage,
   type Choices,
   type ConfirmParams,
@@ -76,6 +77,7 @@ export default function ConfirmApp() {
     const ctx = await a.regionContext();
     await finishSubscription(a, ctx.region.slug, choices);
     clearChoices(session);
+    clearNext(session);
     go(nextFor(choices, next));
   };
 
@@ -90,16 +92,24 @@ export default function ConfirmApp() {
     }
     if (p.branch === 'recovery') return go('/admin/'); // C3: admins only; /admin/ asks for TOTP, then has the password form
     if (p.branch === 'email_change') return setView({ k: 'email_changed' });
-    // Sign-in: save the choices kept by the Subscribe sheet in this browser (B2).
+    // Sign-in: save the choices kept by the Subscribe sheet in this browser (B2). The templates' links carry no
+    // `next`, so fall back to the one the sending page recorded in this browser (the account page's sign-in).
     const stored = readChoices(session);
+    const next = confirmNext(p.next, session);
     try {
-      if (stored) return await save(api, stored, p.next);
+      if (stored) return await save(api, stored, next);
+      // A sign-in from /account/ in this browser: link this device's houses (B3), then land on the account page.
+      if (next === '/account/') {
+        await api.completeHouseLink().catch(() => 0);
+        clearNext(session);
+        return go('/account/');
+      }
       // Opened in another browser, or a plain sign-in: an existing subscription needs nothing more.
       const acct = await api.getMyAccount();
-      if (acct.subscription) return go(safeNext(p.next) === '/' ? '/account/' : safeNext(p.next));
+      if (acct.subscription) return go(next ?? '/account/');
       setView({
         k: 'choices',
-        choices: { houses: true, events: true, cadence: 'daily', account: safeNext(p.next) !== '/subscribed/' },
+        choices: { houses: true, events: true, cadence: 'daily', account: next !== '/subscribed/' },
         topicsError: false,
         busy: false,
         error: '',
@@ -115,7 +125,7 @@ export default function ConfirmApp() {
     if (!c.houses && !c.events) return setView({ ...view, topicsError: true });
     setView({ ...view, busy: true, error: '' });
     try {
-      await save(api, c, p.next);
+      await save(api, c, confirmNext(p.next, session));
     } catch (e) {
       setView({ ...view, busy: false, error: saveMessage(toDataError(e).code) });
     }

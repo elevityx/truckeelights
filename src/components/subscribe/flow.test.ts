@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { DataError } from '@/lib/data/types';
 import {
   CHOICES_KEY,
+  clearNext,
+  confirmNext,
   confirmRedirect,
+  NEXT_KEY,
   deviceAddedHouse,
   emailProblem,
   finishSubscription,
@@ -11,10 +14,12 @@ import {
   nextFor,
   parseConfirm,
   readChoices,
+  readNext,
   reducer,
   resendLeft,
   safeNext,
   saveChoices,
+  saveNext,
   sendCode,
   summary,
   type Choices,
@@ -225,6 +230,26 @@ describe('confirm page rules', () => {
     for (const t of ['invite', 'sms', 'phone_change', '', 'EMAIL']) expect(parseConfirm(`?token_hash=${h}&type=${t}`).ok).toBe(false);
     expect(parseConfirm('?type=email').ok).toBe(false);
     expect(parseConfirm('?token_hash=<script>&type=email').ok).toBe(false);
+  });
+  it('links without next (the Auth templates carry none) land where this browser asked (code or link flow)', () => {
+    const st = memStore();
+    expect(confirmNext(null, st)).toBeNull();
+    saveNext(st, '/account/'); // the account page's email sign-in
+    expect(readNext(st)).toBe('/account/');
+    expect(confirmNext(null, st)).toBe('/account/');
+    expect(confirmNext('/subscribed/', st)).toBe('/subscribed/'); // an explicit, allowed next wins
+    expect(confirmNext('https://evil.example/', st)).toBe('/account/'); // a bad one is ignored
+    saveNext(st, '/subscribed/');
+    expect(confirmNext(null, st)).toBe('/subscribed/');
+    st().setItem(NEXT_KEY, '//evil.example'); // a tampered value is never used
+    expect(readNext(st)).toBeNull();
+    saveNext(st, '/account/');
+    clearNext(st);
+    expect(confirmNext(null, st)).toBeNull();
+    saveNext(st, '/');
+    expect(readNext(st)).toBeNull();
+    expect(confirmNext(null, throwing)).toBeNull();
+    expect(() => saveNext(throwing, '/account/')).not.toThrow();
   });
   it('the sign-in link comes back to this origin with an allowed next', () => {
     expect(confirmRedirect('https://truckeelights.com', true)).toBe('https://truckeelights.com/auth/confirm/?next=%2Faccount%2F');
