@@ -156,11 +156,11 @@ export default function VotesTab({ ctx, onForbidden }: Props) {
       <div className="tbl-wrap">
         <table>
           <thead>
-            <tr><th>Address</th><th>Total</th><th>Today</th><th>24 h</th><th>Voters 24 h</th><th>Top voter</th><th>Voided</th><th>Action</th></tr>
+            <tr><th>Address</th><th>Total</th><th>Today</th><th>24 h</th><th>Voters 24 h</th><th>Top voter</th><th>Networks today</th><th>Voided</th><th>Action</th></tr>
           </thead>
           <tbody>
-            {rows === null && <tr><td colSpan={8}>Loading…</td></tr>}
-            {rows?.length === 0 && <tr><td colSpan={8}>No votes yet.</td></tr>}
+            {rows === null && <tr><td colSpan={9}>Loading…</td></tr>}
+            {rows?.length === 0 && <tr><td colSpan={9}>No votes yet.</td></tr>}
             {rows?.map((r) => {
               const share = topShare(r);
               const hot = flooded(r);
@@ -173,6 +173,7 @@ export default function VotesTab({ ctx, onForbidden }: Props) {
                   <td>{r.votes24h}</td>
                   <td>{r.voters24h}</td>
                   <td>{r.topVoter ? <><code>{shortUid(r.topVoter)}</code> {share === null ? '' : `${share}%`}</> : '–'}</td>
+                  <td>{r.networksToday > 0 ? `${r.networksToday} (top ${r.topNetworkToday})` : '–'}</td>
                   <td>{r.voided}</td>
                   <td>
                     {!isPending && (

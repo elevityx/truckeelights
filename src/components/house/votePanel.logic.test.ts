@@ -67,7 +67,7 @@ describe('voteReducer (AC21)', () => {
   it('maps errors to the spec texts', () => {
     expect(voteErrorMessage('rate_limited', 'uid_daily', 'f')).toBe("You've used today's votes. Come back tomorrow.");
     expect(voteErrorMessage('rate_limited', 'network_daily', 'f')).toBe('This network has given this house 25 votes today. More at midnight.');
-    expect(voteErrorMessage('rate_limited', 'region_breaker', 'f')).toBe('Lots of votes right now. Try again in a few minutes.');
+    expect(voteErrorMessage('rate_limited', 'region_breaker', 'f')).toBe('This house is getting a lot of love right now — try again in a few minutes.');
     expect(voteErrorMessage('not_found', undefined, 'f')).toBe("This house isn't on the map anymore.");
     expect(voteErrorMessage('network', undefined, 'f')).toBe('f');
   });

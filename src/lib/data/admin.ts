@@ -181,10 +181,12 @@ interface RawVoteRow {
   voters_24h: number | string;
   top_voter: string | null;
   top_voter_24h: number | string | null;
+  networks_today?: number | string | null;
+  top_network_today?: number | string | null;
   voided: number | string;
 }
 
-/** Per-house vote stats. `top_voter_24h` is the top voter's count; it is kept as a string to match AdminVoteRow. */
+/** Per-house vote stats. `top_voter_24h` is the top voter's count; a number or null. */
 export async function adminVoteStats(regionId: string): Promise<AdminVoteRow[]> {
   try {
     const { data, error } = await getSupabase().rpc('admin_vote_stats', { p_region_id: regionId });
@@ -197,7 +199,9 @@ export async function adminVoteStats(regionId: string): Promise<AdminVoteRow[]> 
       votes24h: Number(r.votes_24h ?? 0),
       voters24h: Number(r.voters_24h ?? 0),
       topVoter: r.top_voter ?? null,
-      topVoter24h: r.top_voter_24h == null ? null : String(r.top_voter_24h),
+      topVoter24h: r.top_voter_24h == null ? null : Number(r.top_voter_24h),
+      networksToday: Number(r.networks_today ?? 0),
+      topNetworkToday: Number(r.top_network_today ?? 0),
       voided: Number(r.voided ?? 0),
     }));
   } catch (e) {

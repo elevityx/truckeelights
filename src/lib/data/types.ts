@@ -130,7 +130,9 @@ export interface AdminVoteRow {
   votes24h: number;
   voters24h: number;
   topVoter: string | null;
-  topVoter24h: string | null;
+  topVoter24h: number | null;
+  networksToday: number;
+  topNetworkToday: number;
   voided: number;
 }
 export class DataError extends Error {

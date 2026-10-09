@@ -28,7 +28,7 @@ export function capText(c: CapState): string {
 /** Share of the last 24 h held by the top voter, as a whole percent, or null when unknowable. */
 export function topShare(r: Pick<AdminVoteRow, 'votes24h' | 'topVoter24h'>): number | null {
   if (r.topVoter24h == null || !(r.votes24h > 0)) return null;
-  const n = Number(r.topVoter24h);
+  const n = r.topVoter24h;
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.min(100, Math.round((n / r.votes24h) * 100));
 }

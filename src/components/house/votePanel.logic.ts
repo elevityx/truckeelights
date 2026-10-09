@@ -111,7 +111,7 @@ export function voteErrorMessage(code: DataErrorCode, detail: string | undefined
     if (detail === 'house_daily') return `All ${DAILY_LIMIT} votes used for this house today. More at midnight.`;
     if (detail === 'uid_daily') return "You've used today's votes. Come back tomorrow.";
     if (detail === 'network_daily') return 'This network has given this house 25 votes today. More at midnight.';
-    if (detail === 'house_breaker' || detail === 'region_breaker') return 'Lots of votes right now. Try again in a few minutes.';
+    if (detail === 'house_breaker' || detail === 'region_breaker') return 'This house is getting a lot of love right now — try again in a few minutes.';
   }
   if (code === 'votes_closed') return 'Voting opens soon.';
   if (code === 'not_found') return detail === 'photo' ? "That photo can't take votes anymore." : "This house isn't on the map anymore.";

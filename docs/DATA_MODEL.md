@@ -25,7 +25,7 @@ A single row naming the default region (`default_region_id`, not null). A trigge
 Display wordmark per `(region, season)`.
 
 ### `public.site_settings`
-One row per region: `active_season`, `active_year`, `submissions_open` (default false), `photos_open` (default **false**, fail-closed), `updated_at`, `updated_by`.
+One row per region: `active_season`, `active_year`, `submissions_open` (default false), `photos_open` (default **false**, fail-closed), `votes_open` (default true; the per-region voting kill switch), `updated_at`, `updated_by`.
 
 ### `public.houses`
 `region_id`, `season`, `year`, `place_id`, `address`, `normalized_address`, `lat`, `lng`, `coord_source`, `status`, moderation fields (`hidden_reason`, `moderated_by/at`, `released_at`), `created_by`, and optional legacy import keys. Unique keys per `(region, season, year)` on `place_id` and on `normalized_address` de-duplicate in the database. A user-confirmed coordinate requires a `place_id`.
@@ -35,6 +35,12 @@ One row per region: `active_season`, `active_year`, `submissions_open` (default 
 
 ### `public.photos`
 `house_id`, `upload_path` (`{house}/{id}.jpg` in the uploads bucket), `public_path` (random name in the public bucket, set only when approved), `status`, `reserved_until`, rotation and moderation timestamps, `created_by`. Constraints: `public_path` is present exactly when status is `approved`, and both paths match a strict UUID pattern.
+
+### `public.house_vote_totals`
+One row per house that has been voted on (`house_id`, `region_id`, `votes`); a missing row means 0. Publicly readable exactly when the house is visible. It is the only vote data the public reads.
+
+### `private.vote_events` and `private.vote_salts`
+The vote ledger (house, region, season, year, device uid, optional photo, region-local `vote_day`, nullable 16-byte `net_hash`, soft-void fields) and the daily per-region salts behind the hash. Both are private with forced RLS and no grants. Retention nulls the hash and deletes the salt once the day ends. `app_settings.vote_network_cap` (no API grant, default false) turns the per-network cap on.
 
 ### `private.quota_events`
 An append-only ledger used for rate limits. Kinds: `house`, `photo_reserve`, `photo_confirm`. Rows are pruned after 48 hours.

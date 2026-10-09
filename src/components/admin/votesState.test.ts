@@ -34,16 +34,16 @@ describe('capText / capFromBool', () => {
 });
 
 describe('topShare / flooded', () => {
-  it('computes percent', () => expect(topShare({ votes24h: 40, topVoter24h: '10' })).toBe(25));
+  it('computes percent', () => expect(topShare({ votes24h: 40, topVoter24h: 10 })).toBe(25));
   it('null when unknowable', () => {
-    expect(topShare({ votes24h: 0, topVoter24h: '3' })).toBeNull();
+    expect(topShare({ votes24h: 0, topVoter24h: 3 })).toBeNull();
     expect(topShare({ votes24h: 10, topVoter24h: null })).toBeNull();
-    expect(topShare({ votes24h: 10, topVoter24h: 'x' })).toBeNull();
+    expect(topShare({ votes24h: 10, topVoter24h: NaN })).toBeNull();
   });
   it('flags at >=50% and >=20 votes only', () => {
-    expect(flooded({ votes24h: 20, topVoter24h: '10' })).toBe(true);
-    expect(flooded({ votes24h: 20, topVoter24h: '9' })).toBe(false);
-    expect(flooded({ votes24h: 19, topVoter24h: '19' })).toBe(false);
+    expect(flooded({ votes24h: 20, topVoter24h: 10 })).toBe(true);
+    expect(flooded({ votes24h: 20, topVoter24h: 9 })).toBe(false);
+    expect(flooded({ votes24h: 19, topVoter24h: 19 })).toBe(false);
   });
 });
 
