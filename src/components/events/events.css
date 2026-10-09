@@ -3,19 +3,41 @@
 :root[data-theme="christmas"]{ --ev:#E0393E; --on-ev:#FFFFFF; }
 
 /* ---------- Layer switch ---------- */
-/* Wide screens: a segmented control in the quiet bar. Narrower: a chip row under the bar. */
+/* Wide screens (1024+): a segmented control in the quiet bar. Narrower: a pill floating over the top of the map or
+   list, the same family as the bottom Map/List pill, so the header never grows and the map keeps its full height. */
 .bar-layer{display:none}
 .layerseg button{display:inline-flex; align-items:center; gap:2px; min-height:40px; padding:0 14px; font-size:14.5px; white-space:nowrap}
-.layerseg .n,.layerchips .n{font-weight:400; opacity:.75; margin-left:4px; font-variant-numeric:tabular-nums}
-.layerchips{flex:none; position:relative; z-index:9; display:flex; gap:8px; padding:24px 16px 8px; background:var(--bar-b); border-bottom:1px solid var(--line); overflow-x:auto}
-.bar + .layerchips{padding-top:26px} /* clears the drip / lights trim that hangs under the bar */
-.layerchips button{flex:none; display:inline-flex; align-items:center; min-height:40px; padding:0 16px; border-radius:999px; border:1px solid var(--line); background:var(--surface); color:var(--muted); font-weight:700; font-size:14px; cursor:pointer}
-.layerchips button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
-.layerchips button[aria-pressed="true"] .n{opacity:.8}
+.layerseg .n,.layerfloat .n{font-weight:400; opacity:.75; margin-left:4px; font-variant-numeric:tabular-nums}
+/* --float-top clears the drip / lights trim that hangs under the bar; --float-h is the pill's outer height. */
+:root{--trim-h:24px; --float-top:calc(var(--trim-h) + 10px); --float-h:48px}
+.layerfloat{position:absolute; z-index:7; top:var(--float-top); left:50%; transform:translateX(-50%); width:auto; max-width:calc(100% - 32px);
+  display:flex; gap:2px; padding:3px; border-radius:999px; border:1px solid var(--line); background:var(--surface);
+  box-shadow:0 6px 18px rgba(0,0,0,.45)}
+@supports ((-webkit-backdrop-filter:blur(8px)) or (backdrop-filter:blur(8px))){
+  .layerfloat{background:color-mix(in srgb, var(--surface) 88%, transparent); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px)}
+}
+.layerfloat button{flex:none; display:inline-flex; align-items:center; min-height:40px; padding:0 14px; border:0; border-radius:999px; background:transparent;
+  color:var(--muted); font-weight:700; font-size:14px; white-space:nowrap; cursor:pointer}
+.layerfloat button[aria-pressed="true"]{background:var(--accent); color:var(--on-accent)}
+.layerfloat button[aria-pressed="true"] .n{opacity:.8}
+/* The focus colour matches the accent, so a ring of page colour keeps it visible next to the filled segment. */
+.layerfloat button:focus-visible{outline:3px solid var(--focus); outline-offset:2px; box-shadow:0 0 0 2px var(--bg)}
+/* Below 360px: labels only. The counts stay in the accessible name (visually hidden, not removed). */
+@media (max-width:359px){
+  .layerfloat button{padding:0 16px}
+  .layerfloat .n{position:absolute; width:1px; height:1px; margin:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+}
+/* While the float is shown: the map hint and tap-to-add card stack under it (8px gap), and the list starts below it. */
+@media (max-width:1023px){
+  /* Below the float they also clear the tablet's top-left Map/List pill, so they center under the float. */
+  .layerfloat ~ .mapwrap .maphint,.layerfloat ~ .mapwrap .mappop{top:calc(var(--float-top) + var(--float-h) + 8px); left:50%}
+  .layerfloat ~ .mapwrap .mappop{max-width:min(520px, calc(100% - 24px))}
+  .layerfloat ~ .list{padding-top:calc(var(--float-top) + var(--float-h) + 16px)}
+}
 @media (min-width:1024px){
   .bar-layer{display:flex; grid-area:layer; align-items:center}
   .bar-row.has-layer{grid-template-columns:auto minmax(0,1fr) auto auto; grid-template-areas:"id ridge layer add"}
-  .layerchips{display:none}
+  .layerfloat{display:none}
 }
 
 /* ---------- Event pins (Advanced Markers; labels are textContent) ---------- */
