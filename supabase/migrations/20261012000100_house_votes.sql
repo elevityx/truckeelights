@@ -6,6 +6,10 @@
 -- Global lock order (every path follows it; nothing here takes R2's photo:/house:/photo_reserve: keys):
 --   L0 site_settings row of the region, FOR KEY SHARE (vote_house, admin_void_votes). purge_rehearsal and
 --      admin_set_season take that row FOR UPDATE first, so they never interleave with a vote or a void.
+--   L0b public.houses row of the voted house, FOR SHARE OF h (vote_house). Hide/release/status UPDATEs take it
+--      FOR UPDATE, so eligibility (visible, active season) holds until the vote commits.
+--   L0c public.photos row of a photo heart, FOR SHARE (vote_house), always after L0b. Hide/release and revoke
+--      take house then photos (revoke: photo only), so the order stays acyclic.
 --   L1 advisory vote:uid:<uid>                 (vote_house)
 --   L2 private.vote_salts row (region, day)    (vote_house, only on the rare get-or-create)
 --   L3 advisory vote:net:<house>:<hash hex>    (vote_house, only when the network cap applies)
@@ -154,21 +158,29 @@ begin
   perform 1 from public.site_settings s
    where s.region_id = (select h.region_id from public.houses h where h.id = p_house_id)
    for key share;
-  -- The public-house predicate, read after L0 (fresh snapshot: a purge or season switch that finished
-  -- while we waited is seen here). Hidden, released, past-season, and unknown all give the same error.
+  -- The public-house predicate, read after L0 with FOR SHARE OF h: the house row stays share-locked until this
+  -- vote commits, so a concurrent hide / release / status UPDATE waits for the vote (or, if it committed first,
+  -- the row no longer matches after the lock re-check and we give not_found). Only the house row is locked;
+  -- site_settings, regions and the season columns it joins are not. Hidden, released, past-season, and unknown
+  -- all give the same error.
   select h.region_id, h.season, h.year, r.timezone, s.votes_open
     into v_region, v_season, v_year, v_tz, v_open
     from public.houses h
     join public.site_settings s on s.region_id = h.region_id
     join public.regions r on r.id = h.region_id
    where h.id = p_house_id and h.status = 'visible' and r.is_active
-     and s.active_season = h.season and s.active_year = h.year;
+     and s.active_season = h.season and s.active_year = h.year
+   for share of h;
   if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
 
-  -- Photo heart: the photo must be approved and belong to this house (plain read, no lock).
-  if p_photo_id is not null and not exists (
-       select 1 from public.photos p where p.id = p_photo_id and p.house_id = p_house_id and p.status = 'approved') then
-    raise exception 'not_found' using errcode = 'P0002', detail = 'photo';
+  -- Photo heart: the photo must be approved and belong to this house. FOR SHARE on the photo row (after the
+  -- house row, the same order hide/release use: house, then photos) holds it approved until this vote commits,
+  -- so admin_revoke_photo waits; if the revoke committed first the re-check fails and we give not_found/photo.
+  if p_photo_id is not null then
+    perform 1 from public.photos p
+     where p.id = p_photo_id and p.house_id = p_house_id and p.status = 'approved'
+       for share;
+    if not found then raise exception 'not_found' using errcode = 'P0002', detail = 'photo'; end if;
   end if;
 
   if not v_open then raise exception 'votes_closed' using errcode = 'P0001'; end if;

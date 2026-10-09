@@ -300,3 +300,92 @@ test('AC37b: admin_set_season(rehearsal) racing 15 photo-heart votes -> no 40P01
   await q('select private.purge_rehearsal(true)');
   await q(`update public.regions set is_active = false where id = ${lit(rid)}`);
 });
+
+// ---- AC37c: eligibility vs moderation (vote_house takes FOR SHARE on the house and photo rows) ----
+// Deterministic, no timing races: one session holds its transaction open in pg_sleep, a second session is
+// started only after the first is provably holding, and we poll pg_stat_activity for the second to be
+// waiting on a lock. Then both finish and we check the committed outcome.
+const ADMIN2 = () => claims(GLOBAL_ADMIN, { is_anonymous: false, aal: 'aal2' });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(sqlText, what, tries = 100) {
+  for (let i = 0; i < tries; i += 1) { if ((await qn(sqlText)) > 0) return; await sleep(50); }
+  assert.fail(`timed out waiting for ${what}`);
+}
+const HOLD_S = 3;
+/** Session that runs `body` and then keeps its transaction open for HOLD_S seconds. */
+const holder = (claimsJson, headers, body, mark) => psql(tx(claimsJson, headers, `${body}\nselect pg_sleep(${HOLD_S}) /* ${mark} */;`));
+const sleeping = (mark) => `select count(*) from pg_stat_activity where wait_event = 'PgSleep' and query like ${lit(`%${mark}%`)}`;
+const lockWaiting = (needle) => `select count(*) from pg_stat_activity where wait_event_type = 'Lock' and query like ${lit(`%${needle}%`)}`;
+async function approvedPhoto(house) {
+  const id = uuid();
+  await q(`insert into public.photos (id, house_id, upload_path, public_path, status, reserved_until, moderated_at)
+    values (${lit(id)}, ${lit(house)}, ${lit(`${house}/${id}.jpg`)}, ${lit(`${house}/${uuid()}.jpg`)}, 'approved', now(), now())`);
+  return id;
+}
+const settleJobs = (photo) => q(`update private.storage_jobs set done_at = now(), last_error = 'votes test cleanup' where done_at is null and photo_id = ${lit(photo)}`);
+
+test('AC37c(a1): a vote holding the photo share makes admin_revoke_photo wait; the heart commits', async () => {
+  const [house] = await makeHouses(region, 1, 'm1');
+  const photo = await approvedPhoto(house);
+  const uid = uuid();
+  const mark = `hold${tag()}`;
+  const v = holder(claims(uid), { 'cf-connecting-ip': v4(7) },
+    `select 'OK|' || total_votes from public.vote_house(${lit(house)}, ${lit(photo)});`, mark);
+  await until(sleeping(mark), 'the vote to hold its locks');
+  const r = psql(tx(ADMIN2(), {}, `select public.admin_revoke_photo(${lit(photo)});`));
+  await until(lockWaiting(`admin_revoke_photo('${photo}')`), 'the revoke to wait on the vote');
+  assert.equal(await qn(`select count(*) from public.photos where id = ${lit(photo)} and status = 'approved'`), 1, 'photo still approved while the vote is open');
+  const [vr, rr] = await Promise.all([v, r]);
+  assert.equal(classify(vr), 'ok', vr.err);
+  assert.equal(rr.code, 0, rr.err.slice(0, 300));
+  assert.equal(await qn(`select count(*) from private.vote_events where house_id = ${lit(house)} and photo_id = ${lit(photo)}`), 1);
+  assert.equal(await qn(`select count(*) from public.photos where id = ${lit(photo)} and status = 'revoked'`), 1);
+  await settleJobs(photo);
+});
+
+test('AC37c(a2): a revoke that commits first gives the heart not_found/photo and writes nothing', async () => {
+  const [house] = await makeHouses(region, 1, 'm2');
+  const photo = await approvedPhoto(house);
+  const uid = uuid();
+  const mark = `hold${tag()}`;
+  const r = holder(ADMIN2(), {}, `select public.admin_revoke_photo(${lit(photo)});`, mark);
+  await until(sleeping(mark), 'the revoke to hold its locks');
+  const v = vote(uid, house, v4(8), photo);
+  await until(lockWaiting(`vote_house('${house}', '${photo}')`), 'the vote to wait on the revoke');
+  const [rr, vr] = await Promise.all([r, v]);
+  assert.equal(rr.code, 0, rr.err.slice(0, 300));
+  assert.equal(classify(vr), 'not_found/photo', vr.err);
+  assert.equal(await qn(`select count(*) from private.vote_events where house_id = ${lit(house)}`), 0);
+  assert.equal(await total(house), 0);
+  await settleJobs(photo);
+});
+
+test('AC37c(b1): a vote holding the house share makes admin_set_house_status(hidden) wait; the vote commits', async () => {
+  const [house] = await makeHouses(region, 1, 'm3');
+  const mark = `hold${tag()}`;
+  const v = holder(claims(uuid()), { 'cf-connecting-ip': v4(9) },
+    `select 'OK|' || total_votes from public.vote_house(${lit(house)}, null);`, mark);
+  await until(sleeping(mark), 'the vote to hold its locks');
+  const h = psql(tx(ADMIN2(), {}, `select public.admin_set_house_status(${lit(house)}, 'hidden', null);`));
+  await until(lockWaiting(`admin_set_house_status('${house}'`), 'the hide to wait on the vote');
+  assert.equal(await qn(`select count(*) from public.houses where id = ${lit(house)} and status = 'visible'`), 1, 'still visible while the vote is open');
+  const [vr, hr] = await Promise.all([v, h]);
+  assert.equal(classify(vr), 'ok', vr.err);
+  assert.equal(hr.code, 0, hr.err.slice(0, 300));
+  assert.equal(await total(house), 1);
+  assert.equal(await qn(`select count(*) from public.houses where id = ${lit(house)} and status = 'hidden'`), 1);
+});
+
+test('AC37c(b2): a hide that commits first gives the vote not_found and writes nothing', async () => {
+  const [house] = await makeHouses(region, 1, 'm4');
+  const mark = `hold${tag()}`;
+  const h = holder(ADMIN2(), {}, `select public.admin_set_house_status(${lit(house)}, 'hidden', null);`, mark);
+  await until(sleeping(mark), 'the hide to hold its locks');
+  const v = vote(uuid(), house, v4(10));
+  await until(lockWaiting(`vote_house('${house}'`), 'the vote to wait on the hide');
+  const [hr, vr] = await Promise.all([h, v]);
+  assert.equal(hr.code, 0, hr.err.slice(0, 300));
+  assert.equal(classify(vr), 'not_found', vr.err);
+  assert.equal(await qn(`select count(*) from private.vote_events where house_id = ${lit(house)}`), 0);
+  assert.equal(await total(house), 0);
+});
