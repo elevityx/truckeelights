@@ -1,0 +1,25 @@
+name: Remove a house from the map
+description: Ask us to take a house off truckeelights.com
+title: "Remove a house: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Please give only the street address that is already shown on the map. Do not include your name, phone number, email, or other personal details.
+  - type: input
+    id: address
+    attributes:
+      label: Street address shown on the map
+      placeholder: 10000 Example St
+    validations:
+      required: true
+  - type: dropdown
+    id: season
+    attributes:
+      label: Which map?
+      options:
+        - Halloween (Truckee Frights)
+        - Christmas (Truckee Lights)
+        - Both
+    validations:
+      required: true

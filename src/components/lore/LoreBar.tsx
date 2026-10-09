@@ -24,7 +24,7 @@ export default function LoreBar({ season, onShare }: { season: Season; onShare?:
         Next
       </button>
       {onShare && (
-        <button type="button" className="lore-share" aria-label="Share the map" onClick={onShare}>
+        <button type="button" className="lore-share" aria-label="Share the map" title="Share the map" onClick={onShare}>
           <ShareIcon />
           <span className="ls-long">Share map</span>
         </button>

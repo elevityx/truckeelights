@@ -8,3 +8,5 @@
   Cache-Control: no-store
 /flyer/*
   X-Robots-Tag: noindex, nofollow
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
