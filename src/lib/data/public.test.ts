@@ -66,3 +66,13 @@ describe('listMapHouses (AC22)', () => {
     await expect(listMapHouses('r1')).rejects.toMatchObject({ code: 'forbidden' });
   });
 });
+
+describe('subscribeCapability', () => {
+  it('is undefined when the key is missing or malformed, and reads open strictly', async () => {
+    const { subscribeCapability } = await import('./public');
+    expect(subscribeCapability(undefined)).toBeUndefined();
+    expect(subscribeCapability([])).toBeUndefined();
+    expect(subscribeCapability({ open: 'yes' })).toEqual({ open: false });
+    expect(subscribeCapability({ open: true })).toEqual({ open: true });
+  });
+});

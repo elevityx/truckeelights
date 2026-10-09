@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  adminClaimQueue,
   adminEventCounts,
   adminListHouses,
   adminReleaseHouse,
@@ -15,13 +16,16 @@ import {
   type HouseStatus,
   type RegionContext,
 } from '@/lib/data';
+import ClaimsTab from './ClaimsTab';
 import EventsTab from './EventsTab';
+import OverviewTab from './OverviewTab';
 import PhotoQueue from './PhotoQueue';
 import SeasonPanel from './SeasonPanel';
 import VotesTab from './VotesTab';
 import StorageJobsBanner from './StorageJobsBanner';
 import { CLEANUP_WARNING, settleCleanup } from './photosState';
 import { badgeText } from './eventsState';
+import { claimsBadgeText } from './claimsState';
 import { SEASON_LABEL } from './seasonState';
 
 const REASONS = ['Duplicate', 'Not a display', 'Owner asked us to remove it', 'Inappropriate', 'Other'];
@@ -35,9 +39,12 @@ interface Props {
 }
 
 export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
-  const [tab, setTab] = useState<'season' | 'houses' | 'photos' | 'votes' | 'events'>('season');
+  const [tab, setTab] = useState<'season' | 'houses' | 'photos' | 'votes' | 'events' | 'claims' | 'overview'>('season');
   // A1: no events key in the context means a database without events: hide the tab and never call it.
   const hasEvents = ctx.events !== undefined;
+  // Subscribe: no subscribe key in the context means a database without it: hide the tabs and never call it.
+  const hasSubscribe = ctx.subscribe !== undefined;
+  const [pendingClaims, setPendingClaims] = useState<number | null>(null);
   const [pendingEvents, setPendingEvents] = useState<number | null>(null);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [cleanupPending, setCleanupPending] = useState(false);
@@ -75,6 +82,22 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
     return () => clearTimeout(t);
   }, [refreshEventCount]);
 
+  const refreshClaimCount = useCallback(() => {
+    if (!hasSubscribe) return;
+    adminClaimQueue(ctx.region.id, 'pending')
+      .then((c) => setPendingClaims(c.length))
+      .catch(() => setPendingClaims(null));
+  }, [ctx.region.id, hasSubscribe]);
+  useEffect(() => {
+    const t = setTimeout(refreshClaimCount, 0);
+    return () => clearTimeout(t);
+  }, [refreshClaimCount]);
+
+  const tabs: ('season' | 'houses' | 'photos' | 'votes' | 'events' | 'claims' | 'overview')[] = ['season', 'houses', 'photos', 'votes'];
+  if (hasEvents) tabs.push('events');
+  if (hasSubscribe) tabs.push('claims', 'overview');
+  const TAB_LABEL = { season: 'Season', houses: 'Houses', photos: 'Photos', votes: 'Votes', events: badgeText(pendingEvents), claims: claimsBadgeText(pendingClaims), overview: 'Overview' };
+
   return (
     <div className="adm">
       <header className="adm-bar">
@@ -102,16 +125,16 @@ export default function Console({ ctx, onCtx, onForbidden, onSignOut }: Props) {
           </div>
         )}
         <div className="tabs" role="tablist" aria-label="Back office sections">
-          {(hasEvents ? (['season', 'houses', 'photos', 'votes', 'events'] as const) : (['season', 'houses', 'photos', 'votes'] as const)).map((k) => (
-            <button key={k} type="button" role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-              {k === 'season' ? 'Season' : k === 'houses' ? 'Houses' : k === 'photos' ? 'Photos' : k === 'votes' ? 'Votes' : badgeText(pendingEvents)}
-            </button>
+          {tabs.map((k) => (
+            <button key={k} type="button" role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{TAB_LABEL[k]}</button>
           ))}
         </div>
         {tab === 'season' && <SeasonPanel ctx={ctx} onCtx={onCtx} onForbidden={onForbidden} onCleanup={runCleanup} />}
         {tab === 'houses' && <HousesPanel ctx={ctx} onForbidden={onForbidden} onChanged={refreshCount} onCleanup={cleanupAfterAction} />}
         {tab === 'photos' && <PhotoQueue ctx={ctx} onForbidden={onForbidden} onCleanup={cleanupAfterAction} />}
         {tab === 'votes' && <VotesTab ctx={ctx} onForbidden={onForbidden} />}
+        {tab === 'claims' && hasSubscribe && <ClaimsTab ctx={ctx} onForbidden={onForbidden} onChanged={refreshClaimCount} />}
+        {tab === 'overview' && hasSubscribe && <OverviewTab ctx={ctx} onForbidden={onForbidden} />}
         {tab === 'events' && hasEvents && <EventsTab ctx={ctx} onForbidden={onForbidden} onChanged={refreshEventCount} />}
       </div>
     </div>
