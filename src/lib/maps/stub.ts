@@ -15,8 +15,12 @@ export function createStubAdapter(): MapAdapter {
       host.appendChild(panel);
     },
     setPins() {},
+    setEvents() {},
     focus() {},
     onPinSelect() {
+      return () => {};
+    },
+    onEventSelect() {
       return () => {};
     },
     onMapClick() {

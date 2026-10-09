@@ -22,6 +22,7 @@ export interface RegionContext {
   wordmark: string;
   photosOpen: boolean;
   votesOpen: boolean;
+  events?: { open: boolean }; // undefined = DB without events
 }
 export interface Badge {
   kind: string;
@@ -143,3 +144,12 @@ export class DataError extends Error {
     super(code);
   }
 }
+export type EventStatus = 'pending' | 'approved' | 'rejected' | 'hidden';
+export interface PublicEvent { id: string; title: string; description: string; venue: string | null;
+  address: string; lat: number; lng: number; startsAt: string; endsAt: string | null; // ISO UTC
+  url: string | null; adultsOnly: boolean; }
+export interface AdminEvent extends PublicEvent { status: EventStatus; source: 'community' | 'seed';
+  sourceUrl: string | null; rejectReason: string | null; createdAt: string; sameDayWarning: boolean; }
+export interface EventInput { title: string; description: string; venue: string | null; address: string;
+  placeId: string | null; lat: number; lng: number; startsAt: string; endsAt: string | null;
+  url: string | null; adultsOnly: boolean; }
