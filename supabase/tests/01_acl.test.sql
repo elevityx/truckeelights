@@ -3,7 +3,7 @@
 -- Votes: vote_events, vote_salts (private), house_vote_totals (public read), the vote RPCs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(69);
+select plan(73);
 
 -- (1) RLS enabled on every table in public and private.
 select is(
@@ -14,7 +14,7 @@ select is(
 select is(
   (select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname in ('public', 'private') and c.relkind in ('r', 'p')),
-  14, 'exactly 14 tables exist in public + private (R1 + photos + storage_jobs + votes + events)');
+  19, 'exactly 19 tables exist in public + private (R1 + photos + storage_jobs + votes + events + subscribe)');
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname::text), '{}')
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -81,6 +81,20 @@ select ok((select c.relforcerowsecurity from pg_class c where c.oid = 'public.ev
 select is((select array_agg(format('%s:%s:%s', policyname, cmd, array_to_string(roles, ','))) from pg_policies where schemaname = 'public' and tablename = 'events'),
   array['events_public_read:SELECT:anon,authenticated'], 'public.events has exactly one policy: SELECT for anon, authenticated');
 
+-- Subscribe + Accounts: subscriptions and house_claims have FORCE RLS, no policies and no grants (RPCs only).
+select ok(not has_any_column_privilege('anon', 'public.subscriptions', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'public.subscriptions', 'SELECT')
+          and not has_any_column_privilege('anon', 'public.house_claims', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'public.house_claims', 'SELECT'),
+          'no API role can SELECT public.subscriptions or public.house_claims');
+select ok((select bool_and(c.relforcerowsecurity) from pg_class c where c.oid in ('public.subscriptions'::regclass, 'public.house_claims'::regclass))
+          and (select count(*) from pg_policies where schemaname = 'public' and tablename in ('subscriptions', 'house_claims')) = 0,
+          'subscriptions and house_claims: FORCE RLS, no policies');
+select ok(not has_any_column_privilege('authenticated', 'private.house_links', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'private.digest_runs', 'SELECT')
+          and not has_any_column_privilege('authenticated', 'private.digest_sends', 'SELECT'),
+          'no API role can SELECT house_links / digest_runs / digest_sends');
+
 -- (4) Omitted columns are unreadable; the readable set equals the grant list exactly.
 select is(
   (select coalesce(array_agg(format('%s:%s', r.role, x.col) order by format('%s:%s', r.role, x.col)), '{}')
@@ -93,7 +107,9 @@ select is(
        ('regions', 'boundary'), ('regions', 'created_at'),
        ('events', 'normalized_title'), ('events', 'start_day'), ('events', 'place_id'), ('events', 'status'),
        ('events', 'source'), ('events', 'source_url'), ('events', 'reject_reason'), ('events', 'created_by'),
-       ('events', 'created_at'), ('events', 'moderated_by'), ('events', 'moderated_at'), ('events', 'updated_at')) x(tbl, col)
+       ('events', 'created_at'), ('events', 'moderated_by'), ('events', 'moderated_at'), ('events', 'updated_at'),
+       ('events', 'approved_at'), ('houses', 'owner_id'), ('houses', 'owner_since'),
+       ('app_settings', 'digest_daily_cap')) x(tbl, col)
     where has_column_privilege(r.role, format('public.%I', x.tbl), x.col, 'SELECT')),
   '{}'::text[], 'omitted columns are unreadable by anon and authenticated');
 select is(
@@ -115,8 +131,8 @@ select is(
         'regions.min_lng', 'regions.name', 'regions.slug', 'regions.timezone',
         'site_settings.active_season', 'site_settings.active_year', 'site_settings.events_open',
         'site_settings.photos_open', 'site_settings.region_id', 'site_settings.submissions_open',
-        'site_settings.updated_at', 'site_settings.votes_open'],
-  'anon readable columns equal the grant allowlist exactly (no photos column: Amendment 1; Events A1 adds events_open)');
+        'site_settings.subscribe_open', 'site_settings.updated_at', 'site_settings.votes_open'],
+  'anon readable columns equal the grant allowlist exactly (no photos column: Amendment 1; Events A1 adds events_open; Subscribe adds subscribe_open)');
 select ok(not has_column_privilege('anon', 'public.app_settings', 'vote_network_cap', 'SELECT')
           and not has_column_privilege('authenticated', 'public.app_settings', 'vote_network_cap', 'SELECT'),
           'app_settings.vote_network_cap has no grant');
@@ -203,8 +219,11 @@ select is(
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
   array['public.admin_approve_photo(uuid, text)',
+        'public.admin_claim_queue(uuid, text)',
+        'public.admin_clear_owner(uuid)',
         'public.admin_complete_storage_job(bigint)',
         'public.admin_create_event(uuid, text, text, text, text, text, double precision, double precision, timestamp with time zone, timestamp with time zone, text, boolean, text)',
+        'public.admin_digest_today()',
         'public.admin_event_counts(uuid)',
         'public.admin_event_queue(uuid, text)',
         'public.admin_list_houses(uuid, text, text)',
@@ -213,31 +232,54 @@ select is(
         'public.admin_photo_queue(uuid, text)',
         'public.admin_reject_photo(uuid)',
         'public.admin_release_house(uuid)',
+        'public.admin_resolve_claim(uuid, boolean, text)',
         'public.admin_revoke_photo(uuid)',
         'public.admin_set_events_open(uuid, boolean)',
         'public.admin_set_house_status(uuid, text, text)',
         'public.admin_set_network_cap(boolean)',
         'public.admin_set_photos_open(uuid, boolean)',
         'public.admin_set_season(uuid, text, integer, boolean)',
+        'public.admin_set_subscribe_open(uuid, boolean)',
         'public.admin_set_votes_open(uuid, boolean)',
         'public.admin_storage_jobs(uuid)',
+        'public.admin_subscriber_counts(uuid)',
         'public.admin_update_event(uuid, text, text, text, text, text, double precision, double precision, timestamp with time zone, timestamp with time zone, text, boolean)',
         'public.admin_void_votes(uuid, timestamp with time zone, uuid)',
         'public.admin_vote_stats(uuid)',
         'public.admin_whoami(uuid)',
+        'public.begin_house_link(text)',
+        'public.claim_my_submissions()',
+        'public.complete_house_link()',
         'public.confirm_photo_upload(uuid)',
         'public.get_house_photo_counts(uuid)',
         'public.get_region_context(text)',
+        'public.my_account()',
         'public.my_vote_status(uuid)',
         'public.network_probe(text)',
+        'public.owner_set_house_visibility(uuid, boolean)',
+        'public.request_house_claim(uuid, text)',
+        'public.request_house_removal(uuid, text)',
         'public.reserve_photo(uuid)',
+        'public.set_subscription(text, boolean, boolean, text)',
+        'public.stop_subscription()',
         'public.submit_event(text, text, text, text, text, text, double precision, double precision, timestamp with time zone, timestamp with time zone, text, boolean)',
         'public.submit_house(text, text, text, double precision, double precision)',
-        'public.vote_house(uuid, uuid)'],
+        'public.vote_house(uuid, uuid)',
+        'public.withdraw_house_claim(uuid)'],
   'authenticated can execute exactly the allowlist');
 
 -- service_role executes the signer input; nothing else in public beyond the two lists above.
 select ok(has_function_privilege('service_role', 'public.photo_sign_paths(uuid)', 'EXECUTE'), 'service_role can execute photo_sign_paths');
+-- C2: the svc_* routines are service_role only (anon/authenticated are covered by the exact lists above).
+select is(
+  (select array_agg(format('%I(%s)', p.proname, oidvectortypes(p.proargtypes)) order by p.proname)
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'svc\_%' and has_function_privilege('service_role', p.oid, 'EXECUTE')),
+  array['svc_delete_account(uuid)', 'svc_digest_batch(uuid, integer)', 'svc_digest_finish(uuid)',
+        'svc_digest_mark(uuid, uuid, boolean, text)', 'svc_digest_start(text, date)',
+        'svc_unsubscribe_lookup(uuid, integer)', 'svc_unsubscribe_set_prefs(uuid, integer, boolean, boolean, text)',
+        'svc_unsubscribe_stop(uuid, integer)'],
+  'service_role executes exactly the eight svc_* routines');
 select ok(not has_function_privilege('anon', 'public.photo_sign_paths(uuid)', 'EXECUTE')
           and not has_function_privilege('authenticated', 'public.photo_sign_paths(uuid)', 'EXECUTE'), 'anon/authenticated cannot execute photo_sign_paths');
 
@@ -267,19 +309,28 @@ select is(
         'private.photo_upload_allowed', 'private.purge_rehearsal', 'private.reconcile_storage',
         'private.rotate_house_photos', 'private.run_storage_jobs', 'private.set_runner_secret',
         'private.set_storage_runner', 'private.storage_admin_ok', 'private.storage_job_satisfied',
-        'private.storage_object_exists', 'private.sweep_events', 'private.sweep_photos', 'private.take_quota',
+        'private.storage_object_exists', 'private.sweep_events', 'private.sweep_photos', 'private.sweep_subscribe',
+        'private.take_quota',
         'private.vote_retention',
-        'public.admin_approve_photo', 'public.admin_complete_storage_job', 'public.admin_create_event',
+        'public.admin_approve_photo', 'public.admin_claim_queue', 'public.admin_clear_owner',
+        'public.admin_complete_storage_job', 'public.admin_create_event', 'public.admin_digest_today',
         'public.admin_event_counts', 'public.admin_event_queue', 'public.admin_list_houses',
         'public.admin_moderate_event', 'public.admin_network_cap_status', 'public.admin_photo_queue',
-        'public.admin_reject_photo', 'public.admin_release_house', 'public.admin_revoke_photo',
+        'public.admin_reject_photo', 'public.admin_release_house', 'public.admin_resolve_claim', 'public.admin_revoke_photo',
         'public.admin_set_events_open', 'public.admin_set_house_status', 'public.admin_set_network_cap',
-        'public.admin_set_photos_open', 'public.admin_set_season', 'public.admin_set_votes_open',
-        'public.admin_storage_jobs', 'public.admin_update_event', 'public.admin_void_votes',
-        'public.admin_vote_stats', 'public.admin_whoami', 'public.confirm_photo_upload',
-        'public.get_house_photo_counts', 'public.my_vote_status', 'public.network_probe',
-        'public.photo_sign_paths', 'public.reserve_photo', 'public.submit_event', 'public.submit_house',
-        'public.vote_house'],
+        'public.admin_set_photos_open', 'public.admin_set_season', 'public.admin_set_subscribe_open',
+        'public.admin_set_votes_open', 'public.admin_storage_jobs', 'public.admin_subscriber_counts',
+        'public.admin_update_event', 'public.admin_void_votes',
+        'public.admin_vote_stats', 'public.admin_whoami', 'public.begin_house_link', 'public.claim_my_submissions',
+        'public.complete_house_link', 'public.confirm_photo_upload',
+        'public.get_house_photo_counts', 'public.my_account', 'public.my_vote_status', 'public.network_probe',
+        'public.owner_set_house_visibility', 'public.photo_sign_paths', 'public.request_house_claim',
+        'public.request_house_removal', 'public.reserve_photo', 'public.set_subscription', 'public.stop_subscription',
+        'public.submit_event', 'public.submit_house',
+        'public.svc_delete_account', 'public.svc_digest_batch', 'public.svc_digest_finish', 'public.svc_digest_mark',
+        'public.svc_digest_start', 'public.svc_unsubscribe_lookup', 'public.svc_unsubscribe_set_prefs',
+        'public.svc_unsubscribe_stop',
+        'public.vote_house', 'public.withdraw_house_claim'],
   'security definer functions are exactly the intended set');
 select is(
   (select coalesce(array_agg(format('%I.%I', n.nspname, p.proname) order by format('%I.%I', n.nspname, p.proname)), '{}')
