@@ -1,27 +1,73 @@
-/* Printable flyer. The paper is always black on white so it prints well in B/W; the toolbar around it uses the theme tokens. */
+/* Printable flyer in two inks. B/W (`.ink-bw`) is black on white so it prints cheaply; color (`.ink-color`) uses the season's site palette.
+   The paper reads only the --fl-* and --m-* properties below; the toolbar around it uses the theme tokens. The QR is black on white in both inks. */
 .flyer-page{position:absolute; inset:0; overflow:auto; background:var(--bg); color:var(--text); padding:12px 16px 32px}
 .flyer-tools{display:flex; flex-wrap:wrap; align-items:center; gap:10px; max-width:816px; margin:0 auto 12px}
 .flyer-tools .btn{min-height:40px; padding:0 16px; font-size:14px}
 .flyer-tools .btn.primary{margin-left:auto}
 .flyer-tools .seg button{min-height:34px; padding:0 12px; font-size:14px}
 
-.flyer{box-sizing:border-box; max-width:816px; margin:0 auto; background:#fff; color:#000; border-radius:6px; padding:clamp(20px, 6vw, 48px);
+.flyer{
+  --fl-bg:#fff; --fl-text:#000; --fl-kicker:#000; --fl-wm:#000; --fl-wm-shadow:none; --fl-num:#000; --fl-num-bg:transparent; --fl-num-ring:#000;
+  --fl-strong:#000; --fl-rule:#000; --fl-qr-ring:#000; --fl-band:transparent; --fl-band-w:0px;
+  --m-line:#000; --m-ridge-fill:none; --m-rail:#000; --m-portal:#000; --m-arch:#000; --m-ghost:#fff; --m-ghost-line:#000; --m-face:#000;
+  --m-moon:none; --m-moon-line:#000; --m-bat:#000; --m-pumpkin:#fff; --m-pumpkin-line:#000; --m-pumpkin-face:#000; --m-stem:#000;
+  --m-tree:#fff; --m-tree-line:#000; --m-star:#000; --m-bulb:#000; --m-flake:#000;
+  box-sizing:border-box; max-width:816px; margin:0 auto; background:var(--fl-bg); color:var(--fl-text); border-radius:6px; padding:clamp(20px, 6vw, 48px);
+  border-top:var(--fl-band-w) solid var(--fl-band);
   display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; box-shadow:0 0 0 3px var(--deco), 0 18px 50px rgba(0,0,0,.5);
   font-family:var(--body); -webkit-print-color-adjust:exact; print-color-adjust:exact}
 .flyer p{margin:0}
-.fl-kicker{font-size:clamp(13px, 2.6vw, 17px); font-weight:700; letter-spacing:.14em; text-transform:uppercase}
-.fl-wm{margin:0; font-size:clamp(44px, 12vw, 92px); line-height:.95; color:#000; text-shadow:none; font-weight:400}
+.fl-kicker{color:var(--fl-kicker); font-size:clamp(13px, 2.6vw, 17px); font-weight:700; letter-spacing:.14em; text-transform:uppercase}
+.fl-wm{margin:0; font-size:clamp(44px, 12vw, 92px); line-height:.95; color:var(--fl-wm); text-shadow:var(--fl-wm-shadow); font-weight:400}
 .fl-head{font-size:clamp(22px, 5.4vw, 38px); font-weight:800; line-height:1.15; max-width:15em}
 .fl-motif{width:100%; height:auto; max-height:96px; margin:4px 0}
 .fl-main{display:grid; grid-template-columns:auto 1fr; gap:clamp(16px, 4vw, 32px); align-items:center; width:100%; text-align:left; margin-top:4px}
 .fl-qr{margin:0; display:flex; flex-direction:column; align-items:center; gap:6px}
-.fl-qr svg{width:clamp(180px, 42vw, 330px); height:auto; display:block; border:3px solid #000; border-radius:10px}
+.fl-qr svg{width:clamp(180px, 42vw, 330px); height:auto; display:block; border:3px solid var(--fl-qr-ring); border-radius:10px; background:#fff}
 .fl-qr figcaption{font-size:clamp(16px, 3.4vw, 24px); font-weight:800; letter-spacing:.02em}
 .fl-steps{margin:0; padding:0; list-style:none; counter-reset:st; display:flex; flex-direction:column; gap:14px; font-size:clamp(16px, 3.2vw, 22px); line-height:1.3}
+.fl-steps strong{font-weight:800; color:var(--fl-strong); white-space:nowrap}
 .fl-steps li{counter-increment:st; display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start}
-.fl-steps li::before{content:counter(st); display:grid; place-items:center; width:1.7em; height:1.7em; border-radius:50%; border:2.5px solid #000; font-weight:800; font-family:var(--font-display); font-size:1.05em; line-height:1}
+.fl-steps li::before{content:counter(st); display:grid; place-items:center; width:1.7em; height:1.7em; border-radius:50%; border:2.5px solid var(--fl-num-ring); background:var(--fl-num-bg); color:var(--fl-num); font-weight:800; font-family:var(--font-display); font-size:1.05em; line-height:1}
 .fl-pitch{font-size:clamp(15px, 2.8vw, 19px); max-width:34em; margin-top:8px!important}
-.fl-foot{font-size:clamp(14px, 2.6vw, 17px); font-style:italic; border-top:2px dashed #000; padding-top:10px; width:100%}
+.fl-foot{font-size:clamp(14px, 2.6vw, 17px); font-style:italic; border-top:2px dashed var(--fl-rule); padding-top:10px; width:100%}
+
+/* Motif parts (see FlyerMotif). */
+.fl-motif .m-ridge-fill{fill:var(--m-ridge-fill)}
+.fl-motif .m-ridge{stroke:var(--m-line)}
+.fl-motif .m-rail{stroke:var(--m-rail)}
+.fl-motif .m-portal{fill:var(--m-portal)}
+.fl-motif .m-arch{stroke:var(--m-arch)}
+.fl-motif .m-ghost{fill:var(--m-ghost); stroke:var(--m-ghost-line)}
+.fl-motif .m-face{fill:var(--m-face)}
+.fl-motif .m-moon{fill:var(--m-moon); stroke:var(--m-moon-line)}
+.fl-motif .m-bat{fill:var(--m-bat)}
+.fl-motif .m-pumpkin{fill:var(--m-pumpkin); stroke:var(--m-pumpkin-line)}
+.fl-motif .m-pumpkin-face{stroke:var(--m-pumpkin-face)}
+.fl-motif .m-stem{stroke:var(--m-stem)}
+.fl-motif .m-tree{fill:var(--m-tree); stroke:var(--m-tree-line)}
+.fl-motif .m-star{fill:var(--m-star)}
+.fl-motif .m-bulb{fill:var(--m-bulb)}
+.fl-motif .m-flake{stroke:var(--m-flake)}
+
+/* Color ink: the site's Halloween palette (night purple, slime green, pumpkin orange). Text pairs are AA or better. */
+.flyer.ink-color.fl-halloween{
+  --fl-bg:linear-gradient(180deg, #2F1B4A 0%, #1d0f2d 45%, #140A1F 100%); --fl-text:#F3ECDA; --fl-kicker:#FF7A1A; --fl-wm:#8AE234;
+  --fl-wm-shadow:0 3px 0 #2c5509, 0 6px 0 #0a0510; --fl-num:#FF7A1A; --fl-num-ring:#FF7A1A; --fl-strong:#8AE234; --fl-rule:#FF7A1A;
+  --fl-qr-ring:#FF7A1A; --fl-band:#FF7A1A; --fl-band-w:10px;
+  --m-line:#B48BE8; --m-ridge-fill:#3a1f5e; --m-rail:#7B3FBF; --m-portal:#0e0518; --m-arch:#FF7A1A; --m-ghost:#F3ECDA; --m-ghost-line:#F3ECDA;
+  --m-face:#140A1F; --m-moon:#FFB347; --m-moon-line:#FFB347; --m-bat:#0e0518; --m-pumpkin:#FF7A1A; --m-pumpkin-line:#c4520a;
+  --m-pumpkin-face:#140A1F; --m-stem:#8AE234;
+}
+/* Color ink: Christmas in deep evergreen and berry red with warm gold, plus the site's Fraunces wordmark. */
+.flyer.ink-color.fl-christmas{
+  --fl-bg:linear-gradient(180deg, #17583A 0%, #0F3F28 50%, #0A2C1C 100%); --fl-text:#F7F5EF; --fl-kicker:#F2C14E; --fl-wm:#F2C14E;
+  --fl-wm-shadow:0 3px 0 #7a1414; --fl-num:#FFFFFF; --fl-num-bg:#C62828; --fl-num-ring:#F2C14E; --fl-strong:#F2C14E; --fl-rule:#F2C14E;
+  --fl-qr-ring:#F2C14E; --fl-band:#C62828; --fl-band-w:10px;
+  --m-line:#F7F5EF; --m-ridge-fill:#0A2C1C; --m-rail:#F2C14E; --m-portal:#061a10; --m-arch:#F2C14E; --m-tree:#2E8B57; --m-tree-line:#F7F5EF;
+  --m-star:#F2C14E; --m-bulb:#FF6B5E; --m-flake:#F7F5EF;
+}
+
 @media (max-width:599px){ .fl-main{grid-template-columns:1fr; justify-items:center} }
 
 .fl-ack{max-width:816px; margin:14px auto 0; text-align:center; font-size:12px; line-height:1.4; color:var(--muted)}
