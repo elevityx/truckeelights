@@ -24,12 +24,14 @@
 .fl-foot{font-size:clamp(14px, 2.6vw, 17px); font-style:italic; border-top:2px dashed #000; padding-top:10px; width:100%}
 @media (max-width:599px){ .fl-main{grid-template-columns:1fr; justify-items:center} }
 
+.fl-ack{max-width:816px; margin:14px auto 0; text-align:center; font-size:12px; line-height:1.4; color:var(--muted)}
+
 @page{size:letter portrait; margin:.5in}
 @media print{
   :root{color-scheme:light}
   html,body{height:auto!important; overflow:visible!important; display:block!important; background:#fff!important}
   .flyer-page{position:static; overflow:visible; padding:0; background:#fff}
-  .flyer-tools{display:none}
+  .flyer-tools,.fl-ack{display:none}
   .flyer{max-width:none; width:7.5in; height:9.9in; padding:.2in .1in; border-radius:0; box-shadow:none; justify-content:space-between; break-inside:avoid; page-break-inside:avoid}
   .fl-wm{font-size:68pt}
   .fl-head{font-size:28pt}

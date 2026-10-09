@@ -52,6 +52,7 @@ export default function ListView({ season, year, pins, onOpen }: Props) {
             </ul>
           </section>
         ))}
+        <p className="land-ack">Truckee sits on the ancestral homeland of the Washoe (Wašiw) people.</p>
       </div>
     </div>
   );
