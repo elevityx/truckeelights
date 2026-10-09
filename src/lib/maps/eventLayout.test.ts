@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Region } from '@/lib/data/types';
-import { fitEventsCamera, fitTargets, fitZoom, metersBetween, project, spreadOffsets, unproject, type SpreadPoint } from './eventLayout';
+import { fitEventsCamera, fitPointsCamera, fitTargets, fitZoom, metersBetween, project, spreadOffsets, unproject, type SpreadPoint } from './eventLayout';
 
 const region = {
   id: 'r',
@@ -138,5 +138,34 @@ describe('spreadOffsets', () => {
   it('keeps same-venue pins grouped at any zoom', () => {
     const p = [ev('a', 39.3276, -120.1839, '2026-10-01T00:00:00Z'), ev('b', 39.32775, -120.18392, '2026-10-02T00:00:00Z')]; // ~17 m
     expect(spreadOffsets(p, 21).size).toBe(2);
+  });
+});
+
+describe('fitPointsCamera (route)', () => {
+  const vp = { width: 1280, height: 690 };
+  const pad = { top: 120, right: 460, bottom: 60, left: 60 };
+  const pts = [
+    { lat: 39.3312, lng: -120.1905 },
+    { lat: 39.3338, lng: -120.1802 },
+    { lat: 39.3268, lng: -120.1738 },
+  ];
+  it('keeps every point inside the padded area', () => {
+    const cam = fitPointsCamera(pts, vp, pad)!;
+    expect(cam.zoom).toBeGreaterThanOrEqual(10);
+    expect(cam.zoom).toBeLessThanOrEqual(17);
+    const c = project(cam.center, cam.zoom);
+    for (const p of pts) {
+      const q = project(p, cam.zoom);
+      const x = q.x - c.x + vp.width / 2;
+      const y = q.y - c.y + vp.height / 2;
+      expect(x).toBeGreaterThanOrEqual(pad.left - 0.5);
+      expect(x).toBeLessThanOrEqual(vp.width - pad.right + 0.5);
+      expect(y).toBeGreaterThanOrEqual(pad.top - 0.5);
+      expect(y).toBeLessThanOrEqual(vp.height - pad.bottom + 0.5);
+    }
+  });
+  it('caps the zoom for a single stop and returns null for none', () => {
+    expect(fitPointsCamera([pts[0]], vp, pad)!.zoom).toBe(17);
+    expect(fitPointsCamera([], vp, pad)).toBeNull();
   });
 });

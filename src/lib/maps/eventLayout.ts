@@ -145,3 +145,17 @@ export function spreadOffsets(points: SpreadPoint[], zoom: number, o: SpreadOpti
   }
   return out;
 }
+
+/**
+ * Build my route: a camera that fits `points` inside the padded viewport, zoom clamped to [minZoom, maxZoom], with the
+ * same padded-center shift as the events fit. Null when there is nothing to fit.
+ */
+export function fitPointsCamera(points: LatLng[], vp: Viewport, pad: Padding, maxZoom = 17, minZoom = 10): { center: LatLng; zoom: number } | null {
+  if (!points.length || vp.width <= 0 || vp.height <= 0) return null;
+  const box = boxOf(points);
+  const zoom = Math.max(minZoom, Math.min(maxZoom, fitZoom(box, vp, pad)));
+  const a = project({ lat: box.maxLat, lng: box.minLng }, zoom);
+  const b = project({ lat: box.minLat, lng: box.maxLng }, zoom);
+  const mid = { x: (a.x + b.x) / 2 + (pad.right - pad.left) / 2, y: (a.y + b.y) / 2 + (pad.bottom - pad.top) / 2 };
+  return { center: unproject(mid, zoom), zoom };
+}

@@ -8,18 +8,24 @@ interface Props {
   children: ReactNode;
   /** Phones: a tall sheet (top at 12dvh) so a text field near its top stays above the on-screen keyboard. */
   tall?: boolean;
+  /** Keep Tab and Shift+Tab inside the sheet (the route panel). */
+  trap?: boolean;
 }
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 /**
  * Bottom sheet below 760px, 400px right panel at 760px and up, with a scrim on mobile.
  * Escape closes it; the first heading takes focus on open.
  */
-export default function Sheet({ label, onClose, children, tall = false }: Props) {
+export default function Sheet({ label, onClose, children, tall = false, trap = false }: Props) {
   const ref = useRef<HTMLElement>(null);
   // Keep the latest onClose without re-running the focus effect when a parent passes an inline closure.
   const onCloseRef = useRef(onClose);
+  const trapRef = useRef(trap);
   useEffect(() => {
     onCloseRef.current = onClose;
+    trapRef.current = trap;
   });
 
   useEffect(() => {
@@ -30,6 +36,19 @@ export default function Sheet({ label, onClose, children, tall = false }: Props)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCloseRef.current();
+      if (e.key !== 'Tab' || !trapRef.current || !ref.current) return;
+      const els = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      const inside = ref.current.contains(document.activeElement);
+      if (e.shiftKey && (!inside || document.activeElement === first || document.activeElement === ref.current.querySelector('h1,h2,h3'))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (!inside || document.activeElement === last)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
