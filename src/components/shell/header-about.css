@@ -1,0 +1,13 @@
+/* Quiet "About" link at the end of the header's region/season line. Wide: "· About". Phones: an info icon takes the
+   pin icon's place so the line keeps its width; the word stays for screen readers. */
+.sub .sub-about{display:inline-flex; align-items:center; gap:4px; color:var(--muted); text-decoration:none; position:relative}
+.sub .sub-about:hover{color:var(--text); text-decoration:underline; text-underline-offset:3px}
+.sub .sub-about svg{display:none}
+/* A 44px tap target around the small link without changing the line's layout. */
+.sub .sub-about::after{content:""; position:absolute; inset:-14px -8px}
+@media (max-width:599px){
+  .sub > svg:first-child{display:none}
+  .sub .sa-dot{display:none}
+  .sub .sub-about svg{display:block; width:15px; height:15px; color:var(--accent)}
+  .sub .sa-txt{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+}

@@ -35,7 +35,8 @@ Local env: copy `.env.example` to `.env.local`. It holds the `NEXT_PUBLIC_*` val
 The local stack also reads `SUPABASE_AUTH_SITE_URL` and `SUPABASE_AUTH_CAPTCHA_SECRET` through `supabase/config.toml`. `supabase/start-local.sh` (via `npm run db:start`) defaults them to `http://localhost:3000` and Cloudflare's public always-pass test secret. Never put a real captcha secret in the repo.
 
 ## Layout
-- `src/app` (pages), `src/components`
+- `src/app` (pages: `/` map, `/about/` static About + FAQ, `/flyer/` and `/admin/` noindex), `src/components`
+- `src/lib/seo` (JSON-LD builders). `public/sitemap.xml` and `public/robots.txt` are hand-written: add every new indexable page to the sitemap, and keep `/admin/` and `/flyer/` out of it.
 - `src/lib/data` (the **only** Supabase caller)
 - `src/lib/images` (`toJpeg`: browser-side resize and re-encode to JPEG, used by photo upload and admin approve)
 - `src/components/photos` (visitor photo upload sheet, `api.ts` data wiring, `devMock.ts` dev-only mock) and `src/components/house` (house sheet, photo strip, lightbox)

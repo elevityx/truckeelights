@@ -1,5 +1,7 @@
 import type { RegionContext } from '@/lib/data/types';
-import { PinIcon, PlusIcon } from './Icons';
+import Link from 'next/link';
+import { InfoIcon, PinIcon, PlusIcon } from './Icons';
+import './header-about.css';
 import { Ridge } from './Ridge';
 
 interface Props {
@@ -34,6 +36,13 @@ export default function Header({ ctx, onAdd }: Props) {
                 ·
               </span>
               <span>{label}</span>
+              <span className="dot sa-dot" aria-hidden="true">
+                ·
+              </span>
+              <Link className="sub-about" href="/about/">
+                <InfoIcon />
+                <span className="sa-txt">About</span>
+              </Link>
             </p>
           </div>
           <Ridge season={ctx.season} />

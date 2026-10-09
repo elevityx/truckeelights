@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Atkinson_Hyperlegible_Next, Creepster, Fraunces } from 'next/font/google';
+import JsonLd from '@/components/about/JsonLd';
+import { SITE_DESCRIPTION, siteGraph } from '@/lib/seo/jsonld';
 import { BOOT_SCRIPT } from '@/lib/theme/boot';
 import './globals.css';
 
@@ -10,6 +12,9 @@ const fraunces = Fraunces({
   axes: ['SOFT', 'opsz'],
   variable: '--font-fraunces',
   display: 'swap',
+  // Christmas-only display font, about 270 KB: don't preload it on every visit. It still loads (and swaps in) when the
+  // Christmas theme uses it.
+  preload: false,
 });
 const atkinson = Atkinson_Hyperlegible_Next({ subsets: ['latin'], variable: '--font-atkinson', display: 'swap' });
 
@@ -19,8 +24,8 @@ const SHARE_DESCRIPTION = 'The community map of decorated houses in Truckee, CA.
 export const metadata: Metadata = {
   metadataBase: new URL('https://truckeelights.com'),
   alternates: { canonical: '/' },
-  title: 'Truckee Lights · Truckee Frights',
-  description: 'A community map of decorated houses in Truckee, CA. Halloween and Christmas.',
+  title: 'Truckee Halloween Houses & Christmas Lights Map | Truckee Lights',
+  description: SITE_DESCRIPTION,
   icons: '/favicon.ico',
   // Static export: one site-wide card. `?house=` links share it too (no per-house OG without a server).
   // public/og/christmas.png is the matching card for the Christmas season; swap the path when the season flips.
@@ -53,6 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }} />
+        <JsonLd data={siteGraph()} />
       </head>
       <body>{children}</body>
     </html>
