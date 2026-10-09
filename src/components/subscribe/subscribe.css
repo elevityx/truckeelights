@@ -1,0 +1,130 @@
+/* Subscribe + Accounts v1 (owner-approved mockup). Uses the season tokens from globals.css only. */
+
+/* ---------- header menu ---------- */
+.bar-acts{grid-area:add; display:flex; align-items:center; gap:8px}
+/* Smallest phones: the menu button needs room, so Add keeps its icon (and its aria-label) and drops the word. */
+@media (max-width:379px){ .bar-acts .add{width:44px; padding:0} .bar-acts .add span{display:none} }
+.hmenu{position:relative; flex:none}
+.hmenu > .iconbtn{background:var(--surface-2)}
+.hmenu > .iconbtn[aria-expanded="true"]{border-color:var(--text)}
+.hmenu-pop{position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:min(260px, calc(100vw - 32px)); background:var(--surface); border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 14px 34px rgba(0,0,0,.55); display:flex; flex-direction:column; overflow:hidden}
+.hmenu-pop a,.hmenu-pop button{display:flex; flex-direction:column; align-items:flex-start; gap:1px; min-height:56px; padding:10px 14px; border:0; background:none; color:var(--text);
+  text-align:left; font:700 15px/1.3 var(--body); cursor:pointer; text-decoration:none}
+.hmenu-pop > * + *{border-top:1px solid var(--line)}
+.hmenu-pop a:hover,.hmenu-pop button:hover{background:var(--surface-2)}
+.hmenu-pop small{font-weight:400; color:var(--muted); font-size:12.5px}
+.hmenu-new{font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--on-accent); background:var(--accent); border-radius:4px; padding:0 5px; margin-left:6px; vertical-align:1px}
+
+/* ---------- list footer ---------- */
+.sb-lfoot{padding:16px; border-radius:var(--radius); border:1px dashed var(--line); display:flex; flex-direction:column; gap:4px; align-items:center; text-align:center}
+.sb-lfoot p{margin:0; font-size:15px}
+.sb-lfoot .fine{font-size:13px}
+.sb-lfoot .linkbtn,.sb-lfoot a{min-height:44px; display:inline-flex; align-items:center}
+.sb-lfoot .fine a{min-height:0; color:var(--muted); font-weight:400}
+
+/* ---------- sheet + shared form parts ---------- */
+.sb{display:flex; flex-direction:column; gap:14px}
+.sb-fld{display:flex; flex-direction:column; gap:6px; min-width:0}
+.sb-fld > .lbl,.sb-fld > label{font-weight:700; font-size:14.5px}
+.sb-tog{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.sb-tog button{display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-height:56px; padding:10px 12px; border-radius:12px; border:1px solid var(--line);
+  background:var(--surface-2); color:var(--text); text-align:left; cursor:pointer; min-width:0}
+.sb-tog button b{font-size:15px; display:flex; align-items:center; gap:7px}
+.sb-tog button small{font-size:12px; color:var(--muted); line-height:1.3}
+.sb-tog .bx{width:18px; height:18px; border-radius:5px; border:2px solid var(--muted); display:grid; place-items:center; flex:none}
+.sb-tog button[aria-pressed="true"]{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, var(--surface-2))}
+.sb-tog button[aria-pressed="true"] .bx{background:var(--accent); border-color:var(--accent)}
+.sb-tog button[aria-pressed="true"] .bx::after{content:""; width:8px; height:4px; border-left:2px solid var(--on-accent); border-bottom:2px solid var(--on-accent); transform:rotate(-45deg) translate(1px,-1px)}
+.sb-tog.radio .bx{border-radius:50%}
+.sb-tog.radio button[aria-pressed="true"] .bx::after{width:6px; height:6px; border:0; border-radius:50%; background:var(--on-accent); transform:none}
+.sb-ck{display:flex; gap:10px; align-items:flex-start; font-size:14.5px; padding:12px; border-radius:12px; border:1px solid var(--line); background:var(--surface-2); cursor:pointer}
+.sb-ck input{width:20px; height:20px; margin:1px 0 0; accent-color:var(--accent); flex:none}
+.sb-ck b{display:block}
+.sb-ck small{display:block; color:var(--muted); font-size:12.5px; margin-top:2px}
+.sb .btn{width:100%}
+.sb .actions .btn{width:auto; flex:1 1 140px}
+.sb-fine{margin:0; font-size:13px; color:var(--muted); text-align:center}
+.sb-fine a{color:var(--muted)}
+.sb-hint{margin:0; font-size:13px; color:var(--muted)}
+.sb-otp{font-family:var(--body); font-size:28px; letter-spacing:.45em; text-align:center; font-variant-numeric:tabular-nums; font-weight:700; min-height:58px; padding-left:.45em}
+.sb-sentto{padding:10px 12px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); font-size:14.5px; overflow-wrap:anywhere}
+.sb-done{display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; padding:10px 4px}
+.sb-done .ic{width:64px; height:64px; color:var(--accent)}
+.sb-done .ic svg{width:100%; height:100%; display:block}
+.sb-done h3{margin:0; font-size:20px; line-height:1.3; text-wrap:balance}
+.sb-done p{margin:0; color:var(--muted); font-size:14.5px; max-width:36ch; overflow-wrap:anywhere}
+.sb-bot{display:flex; flex-direction:column; gap:10px}
+.sb-mockbot{display:flex; align-items:center; gap:12px; padding:14px; min-height:64px; border:1.5px solid var(--line); border-radius:10px; font-size:14px; background:var(--bg)}
+.sb-mockbot .ok{width:22px; height:22px; border-radius:50%; background:var(--ok); display:grid; place-items:center; color:var(--on-accent); font-weight:700; font-size:13px; flex:none}
+.sb-mockbot .brand{margin-left:auto; font-size:10.5px; color:var(--muted); text-align:right; line-height:1.2}
+.sb-spin{width:22px; height:22px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--accent); animation:spin .8s linear infinite; flex:none}
+.btn .sb-spin{width:16px; height:16px; border-width:2px; border-top-color:currentColor}
+
+/* post-add nudge */
+.sb-nudge{border:1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); background:color-mix(in srgb, var(--accent) 9%, var(--surface-2)); border-radius:14px; padding:14px;
+  display:flex; flex-direction:column; gap:10px; text-align:left; width:100%}
+.sb-nudge b{font-size:16px}
+.sb-nudge p{margin:0; font-size:14px; color:var(--muted)}
+.sb-nudge .actions .btn{flex:1 1 130px}
+
+/* ---------- pages: /account/, /auth/confirm/, /subscribed/, /unsubscribe/, /privacy/ ---------- */
+/* The body is a fixed 100dvh app shell, so each page scrolls inside its own layer (like About). */
+.sb-page{position:absolute; inset:0; overflow-y:auto; background:var(--bg); color:var(--text)}
+.sb-top{position:relative; z-index:2; background:linear-gradient(180deg,var(--bar-a) 0%,var(--bar-a) 45%,var(--bar-b) 100%)}
+.sb-top-in{max-width:620px; margin:0 auto; min-height:60px; padding:8px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px}
+.sb-wm{color:var(--wm); text-shadow:var(--wm-shadow); text-decoration:none; font-size:clamp(21px, 6.6vw, 28px); line-height:1; white-space:nowrap}
+.sb-wm .w2{color:var(--wm2)}
+.sb-top .linkbtn{flex:none; padding:0 4px; font-size:14.5px; display:inline-flex; align-items:center; text-underline-offset:3px}
+:root[data-theme="halloween"] .sb-page .s-x{display:none}
+:root[data-theme="christmas"] .sb-page .s-h{display:none}
+.sb-main{max-width:620px; margin:0 auto; padding:30px 16px 48px; display:flex; flex-direction:column; gap:14px}
+.sb-main > h1{margin:0; font-family:var(--font-display); font-weight:400; font-size:clamp(30px, 8vw, 38px); line-height:1.1; color:var(--accent)}
+.sb-lede{margin:0; color:var(--muted); font-size:15px}
+.sb-card{border:1px solid var(--line); background:var(--surface); border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:12px; min-width:0}
+.sb-card-h{display:flex; justify-content:space-between; align-items:center; gap:10px}
+.sb-card h2{margin:0; font-size:18px; line-height:1.3}
+.sb-card p{margin:0; font-size:14.5px}
+.sb-card .m{color:var(--muted)}
+.sb-card.dz{border-color:color-mix(in srgb, var(--danger) 40%, var(--line))}
+.sb-card.big{padding:26px 18px; align-items:center; text-align:center}
+.sb-card .btn{align-self:stretch}
+.sb-card .actions{align-self:stretch}
+.sb-card .actions .btn{flex:1 1 140px}
+.sb-pill{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; border-radius:999px; padding:2px 9px; border:1px solid currentColor; white-space:nowrap; flex:none}
+.sb-pill::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
+.sb-pill.ok{color:var(--ok)}
+.sb-pill.warn{color:var(--accent-2)}
+.sb-pill.mute{color:var(--muted)}
+.sb-who{display:flex; justify-content:space-between; align-items:center; gap:4px 10px; font-size:14px; color:var(--muted); flex-wrap:wrap}
+.sb-who b{color:var(--text); overflow-wrap:anywhere}
+.sb-who .linkbtn{padding:0; color:var(--muted); font-weight:400}
+.sb-hh{display:flex; gap:12px; align-items:center; min-width:0}
+.sb-hh .g{width:46px; height:46px; flex:none}
+.sb-hh .g svg{width:100%; height:100%; display:block}
+.sb-hh > div{min-width:0}
+.sb-hh b{display:block; font-size:17px; overflow-wrap:anywhere}
+.sb-hh span{font-size:13px; color:var(--muted)}
+.sb-stats{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0}
+.sb-stats div{padding:10px 12px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); display:flex; flex-direction:column; gap:6px; min-width:0}
+.sb-stats dt{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em}
+.sb-stats dd{margin:0; font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; display:flex; align-items:center; gap:10px}
+.sb-inl{display:flex; flex-direction:column; gap:10px; padding:12px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line)}
+.sb-inl p{font-size:14px}
+.sb-res{list-style:none; margin:0; padding:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface-2)}
+.sb-res li + li{border-top:1px solid var(--line)}
+.sb-res button{display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; min-height:52px; text-align:left; padding:10px 12px; border:0; background:none; color:var(--text); cursor:pointer; font-size:14.5px}
+.sb-res button:hover{background:var(--surface)}
+.sb-res button small{color:var(--muted); font-size:12px; flex:none}
+.sb-res button span{min-width:0; overflow-wrap:anywhere}
+.sb-res .empty{padding:12px; font-size:14px; color:var(--muted); text-align:left}
+.sb-row2{display:flex; justify-content:space-between; gap:8px; font-variant-numeric:tabular-nums}
+.sb-err-box{padding:10px 12px; border-radius:12px; border:1px solid color-mix(in srgb, var(--danger) 55%, var(--line)); background:color-mix(in srgb, var(--danger) 10%, var(--surface)); font-size:14.5px; margin:0}
+.sb-prose h2{margin:22px 0 6px; font-family:var(--font-display); font-weight:400; font-size:clamp(24px, 6vw, 30px); line-height:1.1; color:var(--accent)}
+.sb-prose p,.sb-prose li{font-size:16px; line-height:1.6}
+.sb-prose p{margin:0 0 10px}
+.sb-prose ul{margin:0 0 10px; padding-left:20px; list-style:disc}
+.sb-prose a{color:var(--accent); font-weight:700; text-underline-offset:3px}
+.sb-foot{display:flex; justify-content:center; flex-wrap:wrap; gap:10px; margin-top:8px; font-size:14.5px; color:var(--muted)}
+.sb-foot a{min-height:44px; display:inline-flex; align-items:center; color:var(--muted)}
+.sb-done .actions .btn{flex:1 1 140px}

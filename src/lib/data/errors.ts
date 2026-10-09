@@ -4,7 +4,8 @@ const CODES: readonly string[] = [
   'not_signed_in', 'region_not_found', 'submissions_closed', 'invalid_place_id', 'invalid_address',
   'invalid_coordinates', 'out_of_bounds', 'rate_limited', 'forbidden', 'not_found', 'house_released',
   'must_be_hidden', 'invalid_input', 'photo_expired', 'upload_missing', 'not_pending', 'not_approved',
-  'invalid_image', 'photos_closed', 'votes_closed', 'queue_full', 'exists', 'captcha_failed', 'auth_failed',
+  'invalid_image', 'photos_closed', 'votes_closed', 'queue_full', 'exists', 'already_owned', 'claim_pending',
+  'token_invalid', 'token_expired', 'captcha_failed', 'auth_failed',
   'network', 'unknown',
 ] satisfies DataErrorCode[];
 
@@ -61,6 +62,16 @@ export function userMessage(e: DataError, regionName = 'this'): string {
       return "The bot check didn't go through. Try it again.";
     case 'network':
       return "Can't reach the server. Check your connection.";
+    case 'not_signed_in':
+      return 'Sign in with your email to continue.';
+    case 'already_owned':
+      return 'That house is already managed by an account.';
+    case 'claim_pending':
+      return 'You already have a request waiting for review.';
+    case 'token_invalid':
+      return "That link isn't valid anymore. Use the newest email from us.";
+    case 'token_expired':
+      return 'That link has expired. Use the newest email from us.';
     default:
       return 'Something went wrong. Try again.';
   }

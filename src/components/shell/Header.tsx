@@ -12,14 +12,33 @@ interface Props {
   layerSwitch?: ReactNode;
   /** Add opens a chooser (a house or an event), so it shows when either kind is open. */
   addChooser?: { eventsOpen: boolean };
+  /** The menu button (Subscribe, My account, Privacy), shown only while subscriptions are open. */
+  menu?: ReactNode;
 }
 
 /** Quiet bar: wordmark + region/season line, the Donner ridge scene, and Add a house. The scene sits between them on wide screens and in a short band below them on narrow ones. */
-export default function Header({ ctx, onAdd, layerSwitch, addChooser }: Props) {
+export default function Header({ ctx, onAdd, layerSwitch, addChooser, menu }: Props) {
   const i = ctx.wordmark.lastIndexOf(' ');
   const first = i < 0 ? ctx.wordmark : ctx.wordmark.slice(0, i);
   const last = i < 0 ? '' : ctx.wordmark.slice(i + 1);
   const label = `${ctx.season === 'halloween' ? 'Halloween' : 'Christmas'} ${ctx.year}`;
+  const add = addChooser ? (
+    (ctx.submissionsOpen || addChooser.eventsOpen) && (
+      <button type="button" className="btn primary add" aria-label="Add a house or an event" onClick={onAdd}>
+        <PlusIcon />
+        <span className="add-long">Add</span>
+        <span className="add-short">Add</span>
+      </button>
+    )
+  ) : (
+    ctx.submissionsOpen && (
+      <button type="button" className="btn primary add" aria-label="Add a house to the map" onClick={onAdd}>
+        <PlusIcon />
+        <span className="add-long">Add a house</span>
+        <span className="add-short">Add</span>
+      </button>
+    )
+  );
   return (
     <>
       <header className="bar">
@@ -52,22 +71,13 @@ export default function Header({ ctx, onAdd, layerSwitch, addChooser }: Props) {
           </div>
           <Ridge season={ctx.season} />
           {layerSwitch && <div className="bar-layer">{layerSwitch}</div>}
-          {addChooser ? (
-            (ctx.submissionsOpen || addChooser.eventsOpen) && (
-              <button type="button" className="btn primary add" aria-label="Add a house or an event" onClick={onAdd}>
-                <PlusIcon />
-                <span className="add-long">Add</span>
-                <span className="add-short">Add</span>
-              </button>
-            )
+          {menu ? (
+            <div className="bar-acts">
+              {add}
+              {menu}
+            </div>
           ) : (
-            ctx.submissionsOpen && (
-              <button type="button" className="btn primary add" aria-label="Add a house to the map" onClick={onAdd}>
-                <PlusIcon />
-                <span className="add-long">Add a house</span>
-                <span className="add-short">Add</span>
-              </button>
-            )
+            add
           )}
         </div>
         {ctx.season === 'halloween' ? (

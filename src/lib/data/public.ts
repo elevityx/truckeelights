@@ -25,6 +25,12 @@ interface RawContext {
   photos_open?: boolean;
   votes_open?: boolean;
   events?: unknown;
+  subscribe?: unknown;
+}
+
+/** The "subscribe" capability object; same rule as events (missing key -> undefined -> Subscribe UI hidden). */
+export function subscribeCapability(raw: unknown): { open: boolean } | undefined {
+  return eventsCapability(raw);
 }
 
 /** A1: the "events" capability object. Missing (DB without events) -> undefined; never guessed. */
@@ -63,6 +69,7 @@ export async function getRegionContext(slug?: string): Promise<RegionContext> {
       votesOpen: c.votes_open === true,
       // A1: a missing key means a DB without events; the client then never touches events.
       events: eventsCapability(c.events),
+      subscribe: subscribeCapability(c.subscribe),
     };
   } catch (e) {
     throw e instanceof DataError ? e : toDataError(e);
