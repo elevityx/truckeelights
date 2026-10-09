@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rpc = vi.fn();
-vi.mock('./client', () => ({ getSupabase: () => ({ rpc }) }));
+vi.mock('@/lib/supabase/client', () => ({ getSupabase: () => ({ rpc }) }));
 
 import { adminSetNetworkCap } from './admin';
 
