@@ -1,4 +1,5 @@
 import type { PinView, PublicEvent, Region, Season } from '@/lib/data/types';
+import type { Padding } from './eventLayout';
 
 export interface MapMountOptions {
   season: Season;
@@ -16,6 +17,11 @@ export interface MapAdapter {
   onMapClick(cb: (p: LatLng) => void): () => void;
   /** Temporary seasonal marker at a tapped spot while it is looked up; null removes it. */
   showProbe(p: LatLng | null): void;
+  /**
+   * Fit the camera to the shown events (local ones only, unless there are none), keeping `pad` pixels clear for the
+   * controls over the map. If the map isn't built yet, it runs once the map and its events are there.
+   */
+  fitEvents(pad: Padding): void;
   /** Smoothly center on a point and zoom in to `zoom`. */
   zoomTo(p: LatLng, zoom: number): void;
   /** Reverse-geocode a point. [] when nothing is there; rejects when the lookup itself fails. */

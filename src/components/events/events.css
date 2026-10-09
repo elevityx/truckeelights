@@ -42,7 +42,10 @@
 }
 
 /* ---------- Event pins (Advanced Markers; labels are textContent) ---------- */
-.epin{position:relative; display:flex; flex-direction:column; align-items:center; gap:3px; margin:0; padding:0; border:0; background:none; cursor:pointer; transform:translateY(8px)}
+.epin{position:relative; display:flex; flex-direction:column; align-items:center; gap:3px; margin:0; padding:0; border:0; background:none; cursor:pointer;
+  /* --dx/--dy: the ring offset that fans out pins at one venue (set by the map adapter; 0 for a lone pin). */
+  transform:translate(var(--dx, 0px), calc(8px + var(--dy, 0px))); transition:transform .18s ease-out}
+@media (prefers-reduced-motion:reduce){.epin{transition:none}}
 .epin .disc{width:40px; height:40px; border-radius:50%; display:grid; place-items:center; background:var(--surface-2); border:2px solid var(--ev); box-shadow:0 0 0 2px var(--bg), 0 0 14px color-mix(in srgb, var(--ev) 60%, transparent)}
 .epin .disc svg{width:28px; height:28px; display:block}
 .epin .edate{font:700 11px/1 var(--body); letter-spacing:.08em; background:var(--ev); color:var(--on-ev); padding:3px 6px; border-radius:4px; white-space:nowrap; font-variant-numeric:tabular-nums; box-shadow:0 2px 6px rgba(0,0,0,.45)}

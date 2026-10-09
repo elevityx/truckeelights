@@ -49,6 +49,7 @@ export default function HomePage() {
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const eventsNow = useClock(); // advances ~every minute and on visibilitychange: grouping and expiry stay current
   const [eventId, setEventId] = useState<string | null>(null);
+  const [fitEventsSeq, setFitEventsSeq] = useState(0); // bumped when the map should fit the events (F1)
   const [photosKey, setPhotosKey] = useState(0);
   const [addAt, setAddAt] = useState<{ place: PickedPlace; n: number } | null>(null); // map tap -> Add sheet at the pin step
   const [error, setError] = useState<DataError | 'unconfigured' | null>(null);
@@ -106,6 +107,7 @@ export default function HomePage() {
         if (evError) showToast("Couldn't load events. Houses are still here.");
         const h = q.get('house');
         const e = q.get('event');
+        if (startLayer === 'events' && !h && !e) setFitEventsSeq((n) => n + 1);
         if (e) {
           if (evs.some((x) => x.id === e && notEnded(x, Date.now()))) {
             setEventId(e);
@@ -163,6 +165,7 @@ export default function HomePage() {
 
   const changeLayer = useCallback((l: Layer) => {
     setLayer(l);
+    if (l === 'events') setFitEventsSeq((n) => n + 1); // Houses and Both keep the camera
     saveLayer(l, localStore);
     history.replaceState(null, '', layerUrl(window.location.href, l));
   }, []);
@@ -239,6 +242,7 @@ export default function HomePage() {
               onSelect={select}
               events={mapEvents}
               onSelectEvent={selectEvent}
+              fitEventsSeq={layer === 'events' ? fitEventsSeq : 0}
               eventsHint={ctx.events && showsEvents(layer) ? { houses: showsHouses(layer), count: liveEvents.length } : null}
               pickEnabled={ctx.submissionsOpen && showsHouses(layer)}
               onAddAt={(place) => {
