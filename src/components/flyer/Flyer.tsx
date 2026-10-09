@@ -89,6 +89,7 @@ export default function Flyer({ qr, url }: Props) {
         <p className="fl-pitch">{c.pitch}</p>
         <p className="fl-foot">{c.footer}</p>
       </article>
+      <p className="fl-ack">Truckee sits on the ancestral homeland of the Washoe (Wašiw) people.</p>
     </div>
   );
 }
