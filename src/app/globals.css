@@ -482,7 +482,31 @@ aside[role="dialog"]{background:var(--surface)!important; border-top:2px solid v
 .lb-vote .vcheck{align-items:center; color:#F3ECDA}
 
 /* ---------- House votes: list "Top voted" ---------- */
-.lsort button{min-height:40px; padding:0 14px; font-size:14px}
+/* ---------- List controls: layer switch + compact sort button (SortMenu) ---------- */
+/* Below 1024px the list opens with .listctl (switch left, sort right); the houses heading's own sort button is hidden
+   there. At 1024+ the switch lives in the header, so the row is hidden and the heading's button shows. */
+.listctl{display:flex; align-items:center; justify-content:space-between; gap:8px}
+.has-ctl .sort-head{display:none}
+@media (min-width:1024px){ .has-ctl .sort-head{display:block} }
+.sortmenu{position:relative; flex:none}
+.list-head .sortmenu{align-self:center}
+.sortbtn{display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:48px; padding:0 14px; border:1px solid var(--line); border-radius:999px;
+  background:var(--surface); color:var(--text); font:inherit; font-weight:700; font-size:14px; white-space:nowrap; cursor:pointer}
+.sortbtn:hover{border-color:var(--muted)}
+.sortbtn[aria-expanded="true"]{border-color:var(--accent)}
+.sortbtn svg{display:none; width:20px; height:20px; flex:none}
+.sortbtn .caret{font-size:11px; color:var(--muted)}
+/* Not enough room next to the switch (ListControls measures it): icon only; the aria-label keeps the current sort. */
+.listctl[data-fit="icon"] .sortbtn{width:48px; padding:0}
+.listctl[data-fit="icon"] .sortbtn svg{display:block}
+.listctl[data-fit="icon"] .sortbtn .sl,.listctl[data-fit="icon"] .sortbtn .caret{display:none}
+.sortpop{position:absolute; z-index:8; right:0; top:calc(100% + 6px); min-width:190px; display:flex; flex-direction:column; gap:2px; padding:4px;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:12px; box-shadow:0 10px 28px rgba(0,0,0,.5)}
+.sortpop button{display:flex; align-items:center; gap:8px; min-height:44px; padding:0 12px; border:0; border-radius:8px; background:transparent;
+  color:var(--text); font:inherit; font-weight:700; font-size:14px; text-align:left; white-space:nowrap; cursor:pointer}
+.sortpop button:hover,.sortpop button:focus-visible{background:var(--surface)}
+.sortpop button[aria-checked="true"]{color:var(--accent)}
+.sortpop .ck{width:16px; flex:none; text-align:center}
 .rank{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px}
 .row.vrow{grid-template-columns:28px 36px minmax(0,1fr) auto; gap:10px}
 .vrow .rk{font-weight:700; font-size:15px; color:var(--muted); text-align:center; font-variant-numeric:tabular-nums}

@@ -213,6 +213,7 @@ export default function HomePage() {
     );
   }
 
+  const inlineSwitch = ctx.events && <LayerSwitch variant="inline" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />;
   return (
     <>
       <Header
@@ -226,7 +227,9 @@ export default function HomePage() {
       />
       <div className="pbody">
         <div className="views">
-          {ctx.events && <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
+          {ctx.events && view === 'map' && (
+            <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />
+          )}
           {view === 'map' ? (
             <MapView
               season={ctx.season}
@@ -255,6 +258,7 @@ export default function HomePage() {
               year={ctx.year}
               onOpen={selectEvent}
               onAdd={ctx.events.open ? () => setSheet('addEvent') : undefined}
+              layerSwitch={inlineSwitch}
             />
           ) : (
             <ListView
@@ -262,6 +266,7 @@ export default function HomePage() {
               year={ctx.year}
               pins={pins}
               onOpen={select}
+              layerSwitch={inlineSwitch}
               before={
                 ctx.events && layer === 'both' ? (
                   <UpcomingEvents

@@ -22,22 +22,23 @@
 .layerfloat button[aria-pressed="true"] .n{opacity:.8}
 /* The focus colour matches the accent, so a ring of page colour keeps it visible next to the filled segment. */
 .layerfloat button:focus-visible{outline:3px solid var(--focus); outline-offset:2px; box-shadow:0 0 0 2px var(--bg)}
+/* List view: the same pill, in the list's control row instead of floating (it scrolls with the list). */
+.layerinline{position:static; transform:none; flex:none; max-width:none; box-shadow:0 4px 12px rgba(0,0,0,.3)}
 /* Below 360px: labels only. The counts stay in the accessible name (visually hidden, not removed). */
 @media (max-width:359px){
   .layerfloat button{padding:0 16px}
   .layerfloat .n{position:absolute; width:1px; height:1px; margin:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 }
-/* While the float is shown: the map hint and tap-to-add card stack under it (8px gap), and the list starts below it. */
+/* While the float is shown (map view only): the map hint and tap-to-add card stack under it (8px gap). */
 @media (max-width:1023px){
   /* Below the float they also clear the tablet's top-left Map/List pill, so they center under the float. */
   .layerfloat ~ .mapwrap .maphint,.layerfloat ~ .mapwrap .mappop{top:calc(var(--float-top) + var(--float-h) + 8px); left:50%}
   .layerfloat ~ .mapwrap .mappop{max-width:min(520px, calc(100% - 24px))}
-  .layerfloat ~ .list{padding-top:calc(var(--float-top) + var(--float-h) + 16px)}
 }
 @media (min-width:1024px){
   .bar-layer{display:flex; grid-area:layer; align-items:center}
   .bar-row.has-layer{grid-template-columns:auto minmax(0,1fr) auto auto; grid-template-areas:"id ridge layer add"}
-  .layerfloat{display:none}
+  .layerfloat,.listctl{display:none}
 }
 
 /* ---------- Event pins (Advanced Markers; labels are textContent) ---------- */
