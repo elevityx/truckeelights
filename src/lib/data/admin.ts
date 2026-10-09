@@ -172,26 +172,71 @@ export async function adminReleaseHouse(houseId: string): Promise<void> {
   }
 }
 
-// Owner: V3. Votes admin stubs until the RPCs are wired.
-
-export async function adminVoteStats(_regionId: string): Promise<AdminVoteRow[]> {
-  void _regionId;
-  throw new Error('not implemented');
+interface RawVoteRow {
+  house_id: string;
+  address: string;
+  total_votes: number | string;
+  votes_today: number | string;
+  votes_24h: number | string;
+  voters_24h: number | string;
+  top_voter: string | null;
+  top_voter_24h: number | string | null;
+  voided: number | string;
 }
 
-export async function adminVoidVotes(_houseId: string, _since: string | null, _uid: string | null): Promise<number> {
-  void _houseId;
-  void _since;
-  void _uid;
-  throw new Error('not implemented');
+/** Per-house vote stats. `top_voter_24h` is the top voter's count; it is kept as a string to match AdminVoteRow. */
+export async function adminVoteStats(regionId: string): Promise<AdminVoteRow[]> {
+  try {
+    const { data, error } = await getSupabase().rpc('admin_vote_stats', { p_region_id: regionId });
+    if (error) throw error;
+    return ((data ?? []) as RawVoteRow[]).map((r) => ({
+      houseId: r.house_id,
+      address: r.address,
+      totalVotes: Number(r.total_votes ?? 0),
+      votesToday: Number(r.votes_today ?? 0),
+      votes24h: Number(r.votes_24h ?? 0),
+      voters24h: Number(r.voters_24h ?? 0),
+      topVoter: r.top_voter ?? null,
+      topVoter24h: r.top_voter_24h == null ? null : String(r.top_voter_24h),
+      voided: Number(r.voided ?? 0),
+    }));
+  } catch (e) {
+    throw toDataError(e);
+  }
 }
 
-export async function adminSetVotesOpen(_regionId: string, _open: boolean): Promise<void> {
-  void _regionId;
-  void _open;
-  throw new Error('not implemented');
+/** Voids votes on a house: since=null,uid=null is a full reset. Returns how many were voided. */
+export async function adminVoidVotes(houseId: string, since: string | null, uid: string | null): Promise<number> {
+  try {
+    const { data, error } = await getSupabase().rpc('admin_void_votes', {
+      p_house_id: houseId,
+      p_since: since,
+      p_uid: uid,
+    });
+    if (error) throw error;
+    return Number(data ?? 0);
+  } catch (e) {
+    throw toDataError(e);
+  }
 }
 
+export async function adminSetVotesOpen(regionId: string, open: boolean): Promise<void> {
+  try {
+    const { error } = await getSupabase().rpc('admin_set_votes_open', { p_region_id: regionId, p_open: open });
+    if (error) throw error;
+  } catch (e) {
+    throw toDataError(e);
+  }
+}
+
+/** Global admin only: a region-only admin gets `forbidden`. Never defaults; errors throw. */
 export async function adminNetworkCapStatus(): Promise<boolean> {
-  throw new Error('not implemented');
+  try {
+    const { data, error } = await getSupabase().rpc('admin_network_cap_status');
+    if (error) throw error;
+    if (typeof data !== 'boolean') throw new Error('unexpected network cap status');
+    return data;
+  } catch (e) {
+    throw toDataError(e);
+  }
 }
