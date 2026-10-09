@@ -74,6 +74,7 @@ describe('subscribeCapability', () => {
     expect(subscribeCapability([])).toBeUndefined();
     expect(subscribeCapability({})).toEqual({ open: false });
     expect(subscribeCapability({ open: 'true' })).toEqual({ open: false });
+    expect(subscribeCapability({ open: 'yes' })).toEqual({ open: false });
     expect(subscribeCapability({ open: true })).toEqual({ open: true });
   });
 });
