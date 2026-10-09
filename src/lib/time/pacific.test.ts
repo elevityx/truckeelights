@@ -46,6 +46,16 @@ describe('formatting', () => {
     expect(formatRange('2026-10-31T03:00:00Z', '2026-10-31T08:00:00Z', LA)).toBe('Fri, Oct 30 · 8 pm – Sat, Oct 31 · 1 am');
     expect(formatTimes('2026-10-31T03:00:00Z', '2026-10-31T08:00:00Z', LA)).toBe('8 pm–Sat 1 am');
   });
+  it('formats a run of many days as dates plus a nightly window', () => {
+    // Fri Oct 2 6 pm PDT to Sun Nov 1 10 pm PST
+    expect(formatTimes('2026-10-03T01:00:00Z', '2026-11-02T06:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6–10 pm');
+    expect(formatRange('2026-10-03T01:00:00Z', '2026-11-02T06:00:00Z', LA)).toBe('Oct 2 – Nov 1 · nightly 6–10 pm');
+    // starts at 12 am: just the last day
+    expect(formatTimes('2026-10-02T07:00:00Z', '2026-11-02T07:00:00Z', LA)).toBe('Through Nov 1');
+  });
+  it('uses the nightly window when the end is two calendar days later', () => {
+    expect(formatTimes('2026-10-31T03:00:00Z', '2026-11-02T09:00:00Z', LA)).toBe('Oct 30 – Nov 2 · nightly 8 pm–1 am');
+  });
   it('reads an end at 12 am the next day as midnight', () => {
     expect(formatRange('2026-10-31T04:00:00Z', '2026-10-31T07:00:00Z', LA)).toBe('Fri, Oct 30 · 9 pm–midnight');
     expect(formatTimes('2026-10-31T04:00:00Z', '2026-10-31T07:00:00Z', LA)).toBe('9 pm–midnight');

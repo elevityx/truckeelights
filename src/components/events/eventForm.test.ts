@@ -122,3 +122,13 @@ describe('earliestStartDate', () => {
     expect(earliestStartDate(Date.parse('2026-10-31T08:30:00Z'), 'America/Los_Angeles')).toBe('2026-10-31');
   });
 });
+
+describe('a rejected place type', () => {
+  it('clears the earlier valid location and address', async () => {
+    const { clearRejectedPlace, emptyDraft } = await import('./eventForm');
+    const armed = { ...emptyDraft, place: { placeId: 'park', lat: 39.3, lng: -120.2 }, address: '10 Park Way' };
+    const after = clearRejectedPlace(armed);
+    expect(after.place).toBeNull();
+    expect(after.address).toBe('');
+  });
+});

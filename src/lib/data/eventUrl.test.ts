@@ -57,6 +57,15 @@ describe('checkEventUrl mirrors private.valid_event_url', () => {
     expect(checkEventUrl(url)).toEqual({ ok: false, problem });
   });
 
+  it('counts code points like Postgres char_length: 141 emoji after the host is 161 characters and passes', () => {
+    const url = 'https://example.org/' + '😀'.repeat(141);
+    expect([...url].length).toBe(161);
+    expect(url.length).toBe(302);
+    expect(checkEventUrl(url)).toEqual({ ok: true, host: 'example.org' });
+    expect(checkEventUrl('https://example.org/' + '😀'.repeat(281))).toEqual({ ok: false, problem: 'length' }); // 301 characters
+    expect(checkEventUrl('https://example.org/' + '😀'.repeat(280))).toEqual({ ok: true, host: 'example.org' }); // 300
+  });
+
   it('boundary: exactly 300 characters passes, 301 fails', () => {
     const base = 'https://example.org/';
     expect(checkEventUrl(base + 'a'.repeat(300 - base.length)).ok).toBe(true);

@@ -17,7 +17,10 @@ interface Check {
   busy: boolean;
   error: string;
   resetKey: number;
+  /** Unique per check, so a stale completion cannot act on a replacement check. */
+  id: number;
 }
+let checkSeq = 0;
 
 const states = new Map<string, VoteState>();
 const listeners = new Set<() => void>();
@@ -26,6 +29,8 @@ let exhausted = false; // uid_daily: session-wide, until reload
 let check: Check | null = null; // the one pending first vote waiting for the bot check
 let apiP: Promise<VotesApi> | null = null;
 const api = () => (apiP ??= votesApi());
+/** Bumps on every vote settle (ok or fail); a status read that started before the latest bump is stale. */
+let settleSeq = 0;
 
 /** Called with a house's new total whenever its vote store moves (optimistic tap, settle, rollback, server sync),
  *  even with no panel mounted, so the pins, list and map never keep a vote the server refused. */
@@ -65,6 +70,11 @@ function dispatch(houseId: string, a: VoteAction) {
   emit();
 }
 
+const idleNow = (houseId: string) => {
+  const s = states.get(houseId);
+  return !!s && s.queue.length === 0 && !s.inFlight;
+};
+
 async function pump(houseId: string) {
   const s = states.get(houseId);
   if (!s) return;
@@ -73,11 +83,15 @@ async function pump(houseId: string) {
   dispatch(houseId, { type: 'send' });
   try {
     const r = await (await api()).voteHouse(houseId, photoId);
+    settleSeq++;
     dispatch(houseId, { type: 'ok', total: r.totalVotes, left: r.leftToday });
   } catch (e) {
     const err = toDataError(e);
+    settleSeq++;
     if (err.code === 'not_signed_in') session = false; // the next tap shows the bot check again
     dispatch(houseId, { type: 'fail', code: err.code, detail: err.detail, message: voteErrorMessage(err.code, err.detail, userMessage(err)) });
+    // The response may have been lost after the vote committed: re-read the server's count once nothing is queued.
+    if ((err.code === 'network' || err.code === 'unknown') && idleNow(houseId)) void refresh(houseId);
   }
   void pump(houseId);
 }
@@ -97,7 +111,7 @@ async function tap(houseId: string, photoId: string | null, from: VoteSource) {
   if (!s || !canTap(s) || check) return; // one bot check per pending vote, even across repeated taps
   if (session !== true) session = await (await api()).hasSession().catch(() => false);
   if (!session) {
-    check = { houseId, photoId, from, busy: false, error: '', resetKey: 0 };
+    check = { houseId, photoId, from, busy: false, error: '', resetKey: 0, id: ++checkSeq };
     emit();
     return;
   }
@@ -112,13 +126,13 @@ async function onToken(token: string) {
   try {
     await (await api()).ensureAnonymousSession(token);
     session = true;
-    if (check?.busy !== true || check.houseId !== c.houseId) return; // cancelled meanwhile (sheet closed or house switched): drop the tap
+    if (check?.id !== c.id) return; // cancelled or replaced meanwhile (sheet closed, house or photo switched): drop the tap
     check = null;
     emit();
     accept(c.houseId, c.photoId);
     void refresh(c.houseId);
   } catch (e) {
-    if (!check || check.houseId !== c.houseId) return; // cancelled meanwhile
+    if (check?.id !== c.id) return; // cancelled or replaced meanwhile
     check = { ...c, busy: false, error: userMessage(toDataError(e)), resetKey: c.resetKey + 1 };
     emit();
   }
@@ -136,7 +150,9 @@ async function refresh(houseId: string) {
     const a = await api();
     if (session !== true) session = await a.hasSession().catch(() => false);
     if (!session) return;
+    const startedAt = settleSeq;
     const r = await a.getMyVoteStatus(houseId);
+    if (settleSeq !== startedAt) return; // a vote settled while this read was in flight: its answer is older than the store
     dispatch(houseId, { type: 'sync', total: r.totalVotes, left: r.leftToday });
   } catch (e) {
     if (toDataError(e).code === 'not_signed_in') session = false;
@@ -171,6 +187,9 @@ export function useHouseVotes(houseId: string, seedTotal: number) {
   };
 }
 
+/** Test seam: the open-sheet status read. */
+export const _refresh = (houseId: string) => refresh(houseId);
+
 /** Test seams: the module store without React. */
 export const _store = {
   tap,
@@ -186,6 +205,7 @@ export const _store = {
     check = null;
     session = null;
     exhausted = false;
+    settleSeq = 0;
     pinListener = null;
     apiP = null;
   },

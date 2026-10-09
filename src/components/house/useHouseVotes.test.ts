@@ -88,3 +88,63 @@ describe('house switch during first-vote auth', () => {
     expect(_store.get('A', 1).queue).toEqual([]);
   });
 });
+
+describe('stale async results', () => {
+  it('a stale bot-check completion does not consume a replacement check for the same house', async () => {
+    api.hasSession.mockResolvedValue(false);
+    let doneA!: () => void;
+    api.ensureAnonymousSession.mockReturnValueOnce(new Promise<void>((r) => (doneA = r))).mockReturnValue(new Promise<void>(() => {}));
+    _store.get('A', 1);
+    await _store.tap('A', 'photoA', 'photo');
+    const first = _store.onToken('tokA');
+    _store.cancelCheck();
+    await _store.tap('A', 'photoB', 'photo'); // a replacement check for the same house
+    void _store.onToken('tokB'); // busy again, waiting on the bot check
+    const replacement = _store.getCheck();
+    expect(replacement).toMatchObject({ photoId: 'photoB', busy: true });
+    doneA();
+    await first;
+    await flush();
+    expect(_store.getCheck()).toBe(replacement); // untouched
+    expect(api.voteHouse).not.toHaveBeenCalled(); // and photo A's canceled vote was not cast
+  });
+
+  it('a my_vote_status that started before a vote settled does not overwrite the committed total', async () => {
+    _store.get('h1', 10);
+    let status!: (v: unknown) => void;
+    api.getMyVoteStatus.mockReturnValue(new Promise((r) => (status = r)));
+    const seen: number[] = [];
+    setPinTotalListener((_, t) => seen.push(t));
+    // the open-sheet read starts first (via a vote's refresh path), then a vote settles before it answers
+    const { _refresh } = await import('./useHouseVotes');
+    const read = _refresh('h1');
+    await flush();
+    api.voteHouse.mockResolvedValue({ totalVotes: 11, leftToday: 4 });
+    await _store.tap('h1', null, 'panel');
+    await flush();
+    status({ totalVotes: 10, leftToday: 5 }); // older than the vote
+    await read;
+    await flush();
+    expect(_store.get('h1', 10)).toMatchObject({ total: 11, left: 4 });
+    expect(seen.at(-1)).toBe(11);
+  });
+
+  it('after a lost response the status is re-read and the committed total comes back', async () => {
+    _store.get('h1', 10);
+    api.voteHouse.mockRejectedValue(new TypeError('network down')); // vote committed, response lost
+    api.getMyVoteStatus.mockResolvedValue({ totalVotes: 11, leftToday: 4 });
+    await _store.tap('h1', null, 'panel');
+    await flush();
+    expect(api.getMyVoteStatus).toHaveBeenCalledTimes(1);
+    expect(_store.get('h1', 10)).toMatchObject({ total: 11, left: 4, queue: [] });
+  });
+
+  it('keeps the head-only rollback when the status read also fails', async () => {
+    _store.get('h1', 10);
+    api.voteHouse.mockRejectedValue(new TypeError('network down'));
+    api.getMyVoteStatus.mockRejectedValue(new TypeError('still down'));
+    await _store.tap('h1', null, 'panel');
+    await flush();
+    expect(_store.get('h1', 10)).toMatchObject({ total: 10, left: 5, queue: [] });
+  });
+});

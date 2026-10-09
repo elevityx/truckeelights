@@ -14,7 +14,7 @@ import type { PickedPlace } from '@/lib/maps/types';
 import { useClock } from '@/lib/time/useClock';
 import { eventsApi } from './api';
 import EventGlyph from './EventGlyph';
-import { FIELD_ORDER, checkDraft, earliestStartDate, emptyDraft, isBot, type EventDraft, type Field, type FieldErrors } from './eventForm';
+import { FIELD_ORDER, REJECTED_PLACE_ERROR, checkDraft, clearRejectedPlace, earliestStartDate, emptyDraft, isBot, type EventDraft, type Field, type FieldErrors } from './eventForm';
 import { ALREADY_LISTED, THANKS, eventErrorCopy } from './messages';
 
 interface Props {
@@ -77,7 +77,12 @@ export default function AddEventSheet({ ctx, onClose, onBack, onOpenEvent, known
       },
       {
         allowTypes: EVENT_PLACE_TYPES,
-        onReject: () => setGeoNote('Pick a venue, park, plaza or street address, not a whole town or road.'),
+        onReject: () => {
+          // The autocomplete already swapped its text for the rejected pick, so drop the earlier valid location too.
+          setD((x) => clearRejectedPlace(x));
+          setErrors((e) => ({ ...e, location: REJECTED_PLACE_ERROR }));
+          setGeoNote('Pick a venue, park, plaza or street address, not a whole town or road.');
+        },
       },
     );
   }, [formShown, region]);
