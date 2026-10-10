@@ -8,6 +8,7 @@ import { firstSegment, restSegment } from '@/lib/text/address';
 import PhotoStrip from '@/components/house/PhotoStrip';
 import VotePanel from '@/components/house/VotePanel';
 import { CamIcon, DirIcon, ShareIcon, XIcon } from '@/components/shell/Icons';
+import { RouteToggle } from '@/components/route/RouteButtons';
 
 interface Props {
   pin: PinView;
@@ -19,10 +20,12 @@ interface Props {
   onAddPhotos?: () => void;
   photosRefreshKey?: number;
   votesOpen: boolean;
+  /** Build my route: whether this house is a stop, and the toggle. */
+  route?: { inRoute: boolean; onToggle(): void };
   /** A vote (or a fresher server count) changed this house's total. */
 }
 
-export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey, votesOpen }: Props) {
+export default function HouseSheet({ pin, season, year, onClose, onToast, onAddPhotos, photosRefreshKey, votesOpen, route }: Props) {
   const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin.address)}`;
   const label = `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
@@ -44,6 +47,11 @@ export default function HouseSheet({ pin, season, year, onClose, onToast, onAddP
             <XIcon />
           </button>
         </div>
+        {route && (
+          <div className="sec">
+            <RouteToggle inRoute={route.inRoute} onToggle={route.onToggle} />
+          </div>
+        )}
         <div className="sec">
           <ul className="badges" aria-label="What to expect">
             {pin.badges.map((b) => (

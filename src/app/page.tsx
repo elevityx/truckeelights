@@ -12,11 +12,14 @@ import LayerSwitch from '@/components/events/LayerSwitch';
 import AddPhotosSheet from '@/components/photos/AddPhotosSheet';
 import HouseSheet from '@/components/house/HouseSheet';
 import { setPinTotalListener } from '@/components/house/useHouseVotes';
-import ListView from '@/components/list/ListView';
+import ListView, { type RowRoute } from '@/components/list/ListView';
 import { devVotesFixture } from '@/components/house/votesApi';
 import LoreBar from '@/components/lore/LoreBar';
 import MapView from '@/components/map/MapView';
 import HomeIntro from '@/components/home/HomeIntro';
+import { RoutePill } from '@/components/route/RouteButtons';
+import RoutePanel from '@/components/route/RoutePanel';
+import { useRoute } from '@/components/route/useRoute';
 import Header from '@/components/shell/Header';
 import { ListIcon, MapIcon } from '@/components/shell/Icons';
 import Toast from '@/components/shell/Toast';
@@ -36,7 +39,7 @@ import {
   type PublicEvent,
   type RegionContext,
 } from '@/lib/data';
-import type { PickedPlace } from '@/lib/maps/types';
+import type { LatLng, PickedPlace } from '@/lib/maps/types';
 import { mapShareData, shareOrCopy, shareToast } from '@/lib/share/urls';
 import { applySeason } from '@/lib/theme/applySeason';
 import { notEnded } from '@/lib/time/pacific';
@@ -49,7 +52,7 @@ export default function HomePage() {
   const [pins, setPins] = useState<PinView[]>([]);
   const [view, setView] = useState<'map' | 'list'>('map');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | 'subscribe' | 'nudgePreview' | null>(null);
+  const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | 'subscribe' | 'nudgePreview' | 'route' | null>(null);
   const [subAccount, setSubAccount] = useState<boolean | undefined>(undefined); // Subscribe opened from the post-add nudge
   const [layer, setLayer] = useState<Layer>('houses');
   const [events, setEvents] = useState<PublicEvent[]>([]);
@@ -61,6 +64,7 @@ export default function HomePage() {
   const [error, setError] = useState<DataError | 'unconfigured' | null>(null);
   const [toast, setToast] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapCenterRef = useRef<(() => LatLng | null) | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -75,6 +79,18 @@ export default function HomePage() {
     u.searchParams.delete('event');
     history.replaceState(null, '', u.pathname + u.search + u.hash);
   };
+
+  const liveEvents = useMemo(() => events.filter((e) => notEnded(e, eventsNow)), [events, eventsNow]);
+  const mapCenter = useCallback(() => mapCenterRef.current?.() ?? null, []);
+  const regionCenter = useMemo(() => (ctx ? { lat: ctx.region.centerLat, lng: ctx.region.centerLng } : null), [ctx]);
+  const route = useRoute({
+    season: ctx?.season ?? null,
+    pins,
+    toast: showToast,
+    mapCenter,
+    regionCenter,
+  });
+  const routeInit = route.init;
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +129,8 @@ export default function HomePage() {
         const startLayer = c.events ? readLayer(window.location.search, localStore) : 'houses';
         setLayer(startLayer);
         if (evError) showToast("Couldn't load events. Houses are still here.");
+        // Build my route: restore the saved stops (dropping any no longer public) and read a shared ?route= link.
+        const openRoute = routeInit(c.season, c.year, p, window.location.search);
         const h = q.get('house');
         const e = q.get('event');
         if (startLayer === 'events' && !h && !e) setFitEventsSeq((n) => n + 1);
@@ -135,6 +153,8 @@ export default function HomePage() {
           } else {
             showToast("That house isn't on this season's map.");
           }
+        } else if (openRoute) {
+          setSheet('route');
         }
       } catch (e) {
         if (!cancelled) setError(toDataError(e));
@@ -143,7 +163,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [showToast]);
+  }, [showToast, routeInit]);
 
   const select = useCallback((id: string) => {
     setSelectedId(id);
@@ -201,11 +221,18 @@ export default function HomePage() {
   }, [onVoted]);
 
   const selectedPin = useMemo(() => pins.find((p) => p.id === selectedId) ?? null, [pins, selectedId]);
-  const liveEvents = useMemo(() => events.filter((e) => notEnded(e, eventsNow)), [events, eventsNow]);
   const selectedEvent = useMemo(() => events.find((e) => e.id === eventId) ?? null, [events, eventId]);
   const eventIds = useMemo(() => new Set(liveEvents.map((e) => e.id)), [liveEvents]);
   const mapPins = useMemo(() => (showsHouses(layer) ? pins : []), [layer, pins]);
   const mapEvents = useMemo(() => (showsEvents(layer) ? liveEvents : []), [layer, liveEvents]);
+  const { has: routeHas, toggle: routeToggle } = route;
+  const houseRows = useMemo<RowRoute>(() => ({ has: (id) => routeHas('house', id), toggle: (id) => routeToggle('house', id) }), [routeHas, routeToggle]);
+  const openRoute = useCallback(() => {
+    setSelectedId(null);
+    setEventId(null);
+    setUrlHouse(null);
+    setSheet('route');
+  }, []);
 
   const subOpen = ctx?.subscribe?.open === true; // A missing or closed capability hides every Subscribe entry point.
   const openSubscribe = (account?: boolean) => {
@@ -248,7 +275,7 @@ export default function HomePage() {
         layerSwitch={ctx.events && <LayerSwitch variant="bar" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
       />
       <div className="pbody">
-        <div className="views">
+        <div className={route.count > 0 ? 'views has-route' : 'views'}>
           {ctx.events && view === 'map' && (
             <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />
           )}
@@ -262,6 +289,8 @@ export default function HomePage() {
               events={mapEvents}
               onSelectEvent={selectEvent}
               fitEventsSeq={layer === 'events' ? fitEventsSeq : 0}
+              route={sheet === 'route' ? route.views : null}
+              centerRef={mapCenterRef}
               eventsHint={ctx.events && showsEvents(layer) ? { houses: showsHouses(layer), count: liveEvents.length } : null}
               pickEnabled={ctx.submissionsOpen && showsHouses(layer)}
               onAddAt={(place) => {
@@ -291,6 +320,7 @@ export default function HomePage() {
               onOpen={select}
               layerSwitch={inlineSwitch}
               after={subOpen ? <ListSubscribeFooter onSubscribe={() => openSubscribe()} /> : undefined}
+              route={houseRows}
               before={
                 ctx.events && layer === 'both' ? (
                   <UpcomingEvents
@@ -317,6 +347,7 @@ export default function HomePage() {
               List
             </button>
           </div>
+          <RoutePill count={route.count} onOpen={openRoute} />
         </div>
       </div>
       <LoreBar
@@ -337,6 +368,7 @@ export default function HomePage() {
           onAddPhotos={ctx.photosOpen ? () => setSheet('photos') : undefined}
           photosRefreshKey={photosKey}
           votesOpen={ctx.votesOpen}
+          route={{ inRoute: route.has('house', selectedPin.id), onToggle: () => route.toggle('house', selectedPin.id) }}
         />
       )}
       {sheet === 'event' && selectedEvent && (
@@ -400,6 +432,7 @@ export default function HomePage() {
           </div>
         </Sheet>
       )}
+      {sheet === 'route' && <RoutePanel route={route} season={ctx.season} year={ctx.year} onClose={() => setSheet(null)} />}
       <Toast message={toast} />
     </>
   );

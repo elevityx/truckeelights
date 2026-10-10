@@ -70,6 +70,14 @@ interface ListProps {
   onAdd?: () => void;
 }
 
+function EventItem({ e, tz, region, onOpen }: RowProps) {
+  return (
+    <li>
+      <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
+    </li>
+  );
+}
+
 const seasonLabel = (season: Season, year: number) => `${season === 'halloween' ? 'Halloween' : 'Christmas'} ${year}`;
 
 /** The Events view: Today · This week · Later, by start time. */
@@ -99,9 +107,7 @@ export function EventsView({ events, tz, region, now, season, year, onOpen, onAd
                 </h3>
                 <ul>
                   {items.map((e) => (
-                    <li key={e.id}>
-                      <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
-                    </li>
+                    <EventItem key={e.id} e={e} tz={tz} region={region} onOpen={onOpen} />
                   ))}
                 </ul>
               </section>
@@ -134,9 +140,7 @@ export function UpcomingEvents({ events, tz, region, now, season, onOpen, onAdd,
       ) : (
         <ul className="erows">
           {all.slice(0, 3).map((e) => (
-            <li key={e.id}>
-              <EventRow e={e} tz={tz} region={region} onOpen={onOpen} />
-            </li>
+            <EventItem key={e.id} e={e} tz={tz} region={region} onOpen={onOpen} />
           ))}
         </ul>
       )}

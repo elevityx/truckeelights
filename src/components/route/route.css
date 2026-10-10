@@ -1,0 +1,56 @@
+/* Build my route: pill, sheet toggle, list add icon, route panel, map stop badges. Dark themes only (tokens per [data-theme]). */
+
+/* "My route (n)": above the Map/List pill on phones, under it at the top left on wider screens. */
+.routepill{position:absolute; z-index:5; left:50%; bottom:80px; transform:translateX(-50%); display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 18px;
+  border-radius:999px; border:2px solid var(--accent); background:var(--surface); color:var(--text); font:700 15px/1 var(--body); cursor:pointer; white-space:nowrap; box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.routepill svg{width:18px; height:18px; flex:none; color:var(--accent)}
+.routepill:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
+@media (min-width:760px){ .routepill{left:20px; top:98px; bottom:auto; transform:none} }
+.views.has-route .list{padding-bottom:150px}
+@media (min-width:760px){ .views.has-route .list{padding-bottom:24px} }
+
+/* Sheet toggle */
+.btn.rtoggle{font-weight:700}
+.btn.rin{border-color:var(--accent); color:var(--accent)}
+
+/* List rows: the row button plus a compact add button beside it (never nested). */
+.rli{display:flex; gap:8px; align-items:center}
+.rli > .row,.rli > .erow{flex:1; min-width:0}
+.radd{flex:none; width:44px; height:44px; display:grid; place-items:center; border-radius:12px; border:1.5px dashed var(--line); background:transparent; color:var(--muted); cursor:pointer}
+.radd svg{width:20px; height:20px}
+.radd:hover{border-color:var(--muted); color:var(--text)}
+.radd.on{border:1.5px solid var(--accent); color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent)}
+.radd:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
+
+/* Panel */
+.rpanel .rstops{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px}
+.rstop{display:grid; grid-template-columns:24px 32px minmax(0,1fr) auto; grid-template-areas:"n g t b" "n g o o"; column-gap:8px; row-gap:2px; align-items:center; padding:8px 8px 8px 10px; border-radius:var(--radius); background:var(--surface-2); border:1px solid var(--line)}
+.rstop .rn{grid-area:n; width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:var(--accent); color:var(--on-accent); font:700 13px/1 var(--body); font-variant-numeric:tabular-nums}
+.rstop .g{grid-area:g; width:32px; height:32px}
+.rstop .g svg{width:100%; height:100%; display:block}
+.rstop .rt{grid-area:t; min-width:0; display:flex; flex-direction:column; gap:2px}
+.rstop .rt b{font-size:15.5px; line-height:1.25; overflow-wrap:anywhere}
+.rstop .rt small{font-size:13px; color:var(--muted)}
+.rstop .rown{grid-area:o; justify-self:start; font-size:12.5px; color:var(--muted); text-decoration:underline; padding:4px 0 2px}
+.rstop .rown:hover{color:var(--text)}
+.rbtns{grid-area:b; display:flex; gap:4px}
+.rbtns .iconbtn{width:44px; height:44px; border-radius:12px; background:transparent}
+.rbtns .iconbtn svg{width:18px; height:18px}
+.rbtns .iconbtn:disabled{opacity:.3; cursor:not-allowed}
+@media (max-width:399px){
+  .rstop{grid-template-columns:24px minmax(0,1fr) auto; grid-template-areas:"n t b" "n o o"; padding-left:8px}
+  .rstop .g{display:none}
+  .rbtns{gap:2px}
+}
+.rmode{align-self:flex-start}
+.rmode button{min-height:44px; padding:0 18px}
+.rstart{width:100%}
+.rlegs{display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px}
+.rask{padding:12px 14px; border-radius:12px; border:1.5px solid var(--accent); background:var(--surface-2); display:flex; flex-direction:column; gap:8px; margin-top:14px}
+.rask p{margin:0}
+.rsafe{margin:0; padding:10px 12px; border-radius:12px; border-left:4px solid var(--accent-2); background:var(--surface-2); font-size:14px; font-weight:700}
+
+/* Map: numbered badge on a stop's pin while the panel is open (adapter adds .rnum; text is a number, set with textContent). */
+.rnum{position:absolute; top:-6px; right:-8px; z-index:2; min-width:22px; height:22px; padding:0 5px; border-radius:11px; display:grid; place-items:center;
+  background:var(--accent); color:var(--on-accent); border:2px solid var(--bg); font:700 12px/1 var(--body); font-variant-numeric:tabular-nums; pointer-events:none; box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.epin.inroute .rnum{top:-8px; right:-10px}

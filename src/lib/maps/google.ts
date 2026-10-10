@@ -6,10 +6,10 @@ import { loadGoogle } from './loader';
 import { dateBadge, formatRange } from '@/lib/time/pacific';
 import { eventBoundsAdmin } from '@/lib/data/events';
 
-import { fitEventsCamera, fitTargets, spreadOffsets, type Padding } from './eventLayout';
+import { fitEventsCamera, fitPointsCamera, fitTargets, spreadOffsets, type Padding } from './eventLayout';
 import { EVENT_GLYPHS, GLYPHS, PROBES, pickGlyph } from './glyphs';
 import { buildMeter, updateMeter } from './meterEl';
-import type { MapAdapter, MapMountOptions } from './types';
+import type { MapAdapter, MapMountOptions, RouteStopPoint } from './types';
 
 /** Amendment 3: the camera may pan over the admin box (Reno, Carson City), so "Worth the drive" pins can be seen. */
 function eventLatLngBounds(r: Parameters<typeof eventBoundsAdmin>[0]) {
@@ -41,6 +41,59 @@ export function createGoogleAdapter(): MapAdapter {
   let pending: PinView[] | null = null;
   let dead = false;
   let div: HTMLDivElement | null = null;
+  let mapsLib: google.maps.MapsLibrary | null = null;
+  let route: RouteStopPoint[] | null = null;
+  let routeLine: google.maps.Polyline | null = null;
+  const routeBadges: HTMLElement[] = [];
+
+  // Opening the route panel on a wide screen brings the stops into view left of the 400px panel. Phones keep the
+  // camera (the bottom sheet covers most of the map there). False when the map isn't built yet.
+  let routeFitPending = false;
+  const fitRoute = () => {
+    if (!route || !map || !div) return false;
+    if (div.clientWidth < 760) return true;
+    const cam = fitPointsCamera(route, { width: div.clientWidth, height: div.clientHeight }, { top: 120, right: 460, bottom: 60, left: 60 });
+    if (!cam) return true;
+    zoomToken++; // cancel any running zoomTo
+    map.moveCamera({ center: cam.center, zoom: cam.zoom });
+    return true;
+  };
+
+  // Build my route: a numbered badge on each stop's pin and one thin straight polyline. Idempotent; it runs again
+  // after pins render so a pin built later still gets its badge.
+  const drawRoute = () => {
+    for (const b of routeBadges) {
+      b.parentElement?.classList.remove('inroute');
+      b.remove();
+    }
+    routeBadges.length = 0;
+    if (routeLine) routeLine.setMap(null);
+    routeLine = null;
+    if (!route || !map || !mapsLib) return;
+    route.forEach((s, i) => {
+      const rec = s.kind === 'house' ? markers.get(s.id) : emarkers.get(s.id);
+      if (!rec) return;
+      const b = document.createElement('span');
+      b.className = 'rnum';
+      b.setAttribute('aria-hidden', 'true');
+      b.textContent = String(i + 1);
+      rec.el.classList.add('inroute');
+      rec.el.append(b);
+      routeBadges.push(b);
+    });
+    if (route.length > 1) {
+      const color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || THEMES[season].glow;
+      routeLine = new mapsLib.Polyline({
+        map,
+        path: route.map((s) => ({ lat: s.lat, lng: s.lng })),
+        clickable: false,
+        strokeColor: color,
+        strokeOpacity: 0.85,
+        strokeWeight: 3,
+        zIndex: 1,
+      });
+    }
+  };
 
   const render = (pins: PinView[]) => {
     if (!map || !marker) return;
@@ -93,6 +146,7 @@ export function createGoogleAdapter(): MapAdapter {
       });
       markers.set(pin.id, { m, el, meter, pin });
     });
+    if (route) drawRoute();
   };
 
   // Event pins: a theme glyph in a ringed disc with a short date badge, drawn above the houses.
@@ -133,6 +187,7 @@ export function createGoogleAdapter(): MapAdapter {
       emarkers.set(ev.id, { m, el, ev });
     }
     spread();
+    if (route) drawRoute();
   };
 
   // Fan out event pins at one venue, or whose pins overlap at this zoom, on a small ring. Houses never move.
@@ -171,6 +226,7 @@ export function createGoogleAdapter(): MapAdapter {
       const libs = await loadGoogle();
       if (dead) return;
       marker = libs.marker;
+      mapsLib = libs.maps;
       const r = o.region;
       region = r;
       div = document.createElement('div');
@@ -198,6 +254,19 @@ export function createGoogleAdapter(): MapAdapter {
       if (pendingEvents) renderEvents(pendingEvents.events, pendingEvents.tz);
       map.addListener('zoom_changed', spread);
       if (pendingFit && fit(pendingFit)) pendingFit = null;
+      if (route) drawRoute();
+      if (routeFitPending && fitRoute()) routeFitPending = false;
+    },
+    setRoute(stops) {
+      const opening = !route && !!stops && stops.length > 0;
+      route = stops && stops.length > 0 ? stops : null;
+      drawRoute();
+      if (opening) routeFitPending = !fitRoute();
+      else if (!route) routeFitPending = false;
+    },
+    getCenter() {
+      const c = map?.getCenter();
+      return c ? { lat: c.lat(), lng: c.lng() } : null;
     },
     fitEvents(pad) {
       pendingFit = fit(pad) ? null : pad;
@@ -277,6 +346,11 @@ export function createGoogleAdapter(): MapAdapter {
       clickListeners.clear();
       if (probe) probe.map = null;
       probe = null;
+      route = null;
+      routeFitPending = false;
+      routeLine?.setMap(null);
+      routeLine = null;
+      routeBadges.length = 0;
       pendingFit = null;
       zoomToken++;
       map = null;

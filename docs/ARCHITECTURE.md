@@ -53,6 +53,7 @@ The digest's provider idempotency key is stored per content window (`digest:<pub
 - `src/lib/theme` holds the season themes. A small boot script sets the theme from local storage, or from a date rule, before first paint to avoid a flash, and the app corrects it once the region's settings load.
 - `src/lib/text` has pure address helpers.
 - `src/components/admin` is the admin back office at `/admin/`.
+- `src/lib/route` + `src/components/route` are **Build my route**, client-only: stops live in this device's `localStorage`, ordering is straight-line nearest neighbor + 2-opt on the device, and "Start route" hands off to a Google Maps directions URL (split into legs of 3 waypoints on phones, 9 on desktop). No API call, no server state; the visitor's location is read once on request and only goes into the Google Maps link.
 
 ## Region model
 
