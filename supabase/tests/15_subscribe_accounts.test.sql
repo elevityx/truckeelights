@@ -7,7 +7,7 @@
 -- and Amendment 3's digest data (season + opener, town, votes, far; last_digest_* advanced only on sent).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(219);
+select plan(227);
 
 -- ---------------------------------------------------------------- fixtures (as postgres)
 delete from public.admins;
@@ -657,6 +657,45 @@ set local role service_role;
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run6')::uuid, 100)), 0, 'a stale send with no content left is not sent ...');
 reset role;
 select is((select status || '|' || error_code from private.digest_sends where run_id = current_setting('t.run5')::uuid), 'failed|no_content', '... it is closed as failed/no_content');
+-- Retention sweep: a `sending` row's payload is never cleared; one idle 2 days is closed failed/abandoned first.
+insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to, payload, updated_at) values
+  (current_setting('t.run5')::uuid, 'f5000000-0000-4000-a000-000000000002', 'sending',
+   'digest:' || gen_random_uuid() || ':2026-10-01T00:00:00.000000Z/2026-10-02T00:00:00.000000Z',
+   now() - interval '5 days', now() - interval '4 days', '{"html": "A"}', now() - interval '1 day 23 hours'),
+  (current_setting('t.run6')::uuid, 'f5000000-0000-4000-a000-000000000002', 'sending',
+   'digest:' || gen_random_uuid() || ':2026-10-02T00:00:00.000000Z/2026-10-03T00:00:00.000000Z',
+   now() - interval '3 days', now() - interval '2 days', '{"html": "B"}', now() - interval '1 day');
+update private.digest_sends set payload = '{"html": "leftover"}', updated_at = now() - interval '3 days'
+ where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000001';
+select set_config('t.failed5', (select failed::text from private.digest_runs where run_id = current_setting('t.run5')::uuid), true);
+select set_config('t.sw', private.sweep_subscribe()::text, true);
+select is((select status || '|' || (payload is not null) from private.digest_sends
+            where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002'), 'sending|true',
+  'sweep: a sending row idle just under 2 days keeps its status and payload');
+select is((select status || '|' || (payload is not null) from private.digest_sends
+            where run_id = current_setting('t.run6')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002'), 'sending|true',
+  'sweep: a recent sending row keeps its payload');
+update private.digest_sends set updated_at = now() - interval '3 days'
+ where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002';
+select set_config('t.sw', private.sweep_subscribe()::text, true);
+select is((select status || '|' || error_code from private.digest_sends
+            where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002'), 'failed|abandoned',
+  'sweep: a sending row idle past 2 days is first closed failed/abandoned');
+select ok((select payload is null from private.digest_sends
+            where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002'),
+  'sweep: ... and only then is its payload cleared');
+select ok((select payload is not null and status = 'sending' from private.digest_sends
+            where run_id = current_setting('t.run6')::uuid and user_id = 'f5000000-0000-4000-a000-000000000002'),
+  'sweep: the still-recent sending row keeps its payload');
+select ok((select payload is null from private.digest_sends
+            where run_id = current_setting('t.run5')::uuid and user_id = 'f5000000-0000-4000-a000-000000000001'),
+  'sweep: a settled (failed) row idle 2 days has a leftover payload cleared');
+select is((select count(*)::int from private.digest_sends where status = 'sending' and payload is null
+            and run_id in (current_setting('t.run5')::uuid, current_setting('t.run6')::uuid)), 0,
+  'sweep: never leaves a sending row with its payload nulled');
+select is((select failed - current_setting('t.failed5')::int from private.digest_runs where run_id = current_setting('t.run5')::uuid), 1,
+  'sweep: the run''s failed counter counts the abandoned row');
+delete from private.digest_sends where user_id = 'f5000000-0000-4000-a000-000000000002' and run_id in (current_setting('t.run5')::uuid, current_setting('t.run6')::uuid);
 -- The daily cap is one budget across run kinds: today's daily rows count against the weekly run.
 update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000002';
 select set_config('t.used', (select count(*)::text from private.digest_sends d

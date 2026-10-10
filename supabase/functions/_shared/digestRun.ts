@@ -73,6 +73,8 @@ export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<Ou
     unsubUrl: `${cfg.siteUrl}/unsubscribe/?t=${encodeURIComponent(unsubToken)}`,
     prefsUrl: `${cfg.siteUrl}/unsubscribe/?t=${encodeURIComponent(prefsToken)}`,
     cadence: r.cadence,
+    wantHouses: r.want_houses === true,
+    wantEvents: r.want_events === true,
     timezone: r.timezone,
     season: r.season,
     seasonYear: r.season_year,

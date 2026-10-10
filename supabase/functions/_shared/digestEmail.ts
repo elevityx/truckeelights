@@ -25,6 +25,9 @@ export interface RenderInput extends DigestContent {
   unsubUrl: string;
   prefsUrl: string;
   cadence: 'daily' | 'weekly';
+  /** The topics the subscriber chose; the footer says which ("new houses", "new events" or both). */
+  wantHouses: boolean;
+  wantEvents: boolean;
   /** The region's IANA zone (from the digest row); falls back to Pacific. */
   timezone?: string;
   /** The season fixed on the row at claim time. */
@@ -190,7 +193,9 @@ export function renderDigest(input: RenderInput): Rendered | null {
   const intro = introFor(c, input.cadence, season, year, input.seasonOpener);
   const preheader = `Hi neighbor, here’s what went up ${when}, starting with ${c.houses[0]?.address ?? c.events[0]?.title}.`;
   const region = cleanText(input.regionName) ?? 'Truckee';
-  const why = `You’re getting this ${input.cadence} email because you subscribed to new houses and events around ${region}.`;
+  const topics = input.wantHouses && !input.wantEvents ? 'new houses'
+    : input.wantEvents && !input.wantHouses ? 'new events' : 'new houses and events';
+  const why = `You’re getting this ${input.cadence} email because you subscribed to ${topics} around ${region}.`;
   const free = `${t.brand} is a free, non-commercial community map. No ads, no paid listings.`;
   const voteLine = 'Seen one that made you stop the car? Your vote helps neighbors find the best ones.';
   const f = `font-family:${SYS};`;

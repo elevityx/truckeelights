@@ -69,7 +69,7 @@ export default function PrivacyPage() {
             start again.
           </li>
           <li>The email hash for linking a device’s houses: deleted within a day.</li>
-          <li>The copy of a digest email being sent: deleted as soon as it is sent or fails, and within 2 days at most.</li>
+          <li>The copy of a digest email being sent: deleted as soon as it is sent or fails, and if a send is never resolved, within 2 days at most (the send is then closed as failed and a later run starts a new one).</li>
           <li>Records of which digests were sent: 60 days.</li>
           <li>Requests to manage or remove a house: while they are open, then 180 days after they are decided.</li>
         </ul>

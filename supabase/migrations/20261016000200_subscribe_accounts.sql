@@ -137,7 +137,7 @@ create table private.digest_runs (
 -- payload: the exact email (from, to, subject, html, text, headers) rendered when the row was first claimed, stored by
 -- svc_digest_store_payload BEFORE the provider call. A resumed row is sent from it verbatim with the same key, so Resend
 -- sees the identical request whatever changed since (houses, events, preferences, token version). It is cleared as soon
--- as the row reaches a definite outcome (svc_digest_mark), and the daily sweep clears any left on a row idle 2 days.
+-- as the row reaches a definite outcome (svc_digest_mark). The daily sweep never clears a `sending` row's payload: it first closes a `sending` row idle 2 days as failed/abandoned, then clears it.
 create table private.digest_sends (
   run_id uuid not null references private.digest_runs(run_id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -829,7 +829,8 @@ returns table (run_id uuid, user_id uuid, email text, idempotency_key text, wind
                public_id uuid, token_version integer,
                region_slug text, region_name text, timezone text, cadence text,
                season text, season_year integer, season_opener boolean,
-               houses jsonb, house_total integer, events jsonb, event_total integer, payload jsonb)
+               houses jsonb, house_total integer, events jsonb, event_total integer, payload jsonb,
+               want_houses boolean, want_events boolean)
 language plpgsql security definer set search_path = '' as $$
 #variable_conflict use_column
 declare
@@ -846,6 +847,7 @@ begin
     into v_room from public.app_settings a;
   for c in
     select s.user_id, u.email::text as email, s.public_id, s.token_version, r.slug, r.name, r.timezone, s.cadence,
+           s.houses as s_houses, s.events as s_events,
            coalesce(s.last_sent_through, s.confirmed_at) as w_from,
            p.run_id as p_run, p.idempotency_key as p_key, p.payload as p_payload,
            coalesce(p.window_to, v_run.window_to) as w_to,
@@ -935,7 +937,7 @@ begin
     public_id := c.public_id; token_version := c.token_version; region_slug := c.slug; region_name := c.name;
     timezone := c.timezone; cadence := c.cadence; houses := c.h_items; house_total := c.h_total;
     season := c.sea_season::text; season_year := c.sea_year; season_opener := c.opener;
-    events := c.e_items; event_total := c.e_total;
+    events := c.e_items; event_total := c.e_total; want_houses := c.s_houses; want_events := c.s_events;
     return next;
   end loop;
 end $$;
@@ -1087,13 +1089,30 @@ begin
   return v_n;
 end $$;
 
--- Retention: links after a day, a stored digest payload once its row is settled (svc_digest_mark) or idle 2 days,
+-- Retention: links after a day, a stored digest payload once its row is settled (svc_digest_mark; a `sending` row idle 2 days is closed as failed/abandoned first),
 -- digest bookkeeping after 60 days, resolved claims after 180 days.
 create function private.sweep_subscribe() returns integer
 language plpgsql security definer set search_path = '' as $$
 declare v_n integer; v_t integer := 0;
 begin
-  update private.digest_sends set payload = null where payload is not null and updated_at < now() - interval '2 days';
+  -- A `sending` row's payload is the only byte-stable copy of an email Resend may already have accepted, so it is
+  -- NEVER cleared while the row can still resume. A `sending` row idle 2 days is first closed as failed/abandoned
+  -- (the next run claims a new row with its own key, like any failed row), and its payload is cleared in that same
+  -- statement; the run's failed counter moves with it.
+  with ab as (
+    update private.digest_sends set status = 'failed', error_code = 'abandoned', payload = null, updated_at = now()
+     where status = 'sending' and updated_at < now() - interval '2 days'
+    returning run_id
+  ), cnt as (
+    update private.digest_runs r set failed = r.failed + n.c
+      from (select run_id, count(*)::integer as c from ab group by run_id) n where r.run_id = n.run_id
+    returning 1
+  )
+  select count(*) into v_n from ab;
+  v_t := v_t + v_n;
+  -- Settled rows only: svc_digest_mark already clears these, so this is a backstop.
+  update private.digest_sends set payload = null
+   where payload is not null and status in ('sent', 'failed') and updated_at < now() - interval '2 days';
   get diagnostics v_n = row_count; v_t := v_t + v_n;
   delete from private.house_links where created_at < now() - interval '1 day';
   get diagnostics v_n = row_count; v_t := v_t + v_n;

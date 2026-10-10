@@ -7,7 +7,7 @@ import { dueKinds, pacificParts } from './pacific.ts';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base: Omit<RenderInput, 'houses' | 'events' | 'housesTotal' | 'eventsTotal'> = {
   siteUrl: 'https://example.test', unsubUrl: 'https://example.test/unsubscribe/?t=U', prefsUrl: 'https://example.test/unsubscribe/?t=P',
-  cadence: 'daily', timezone: 'America/Los_Angeles', season: 'halloween', seasonYear: 2026, seasonOpener: false,
+  cadence: 'daily', wantHouses: true, wantEvents: true, timezone: 'America/Los_Angeles', season: 'halloween', seasonYear: 2026, seasonOpener: false,
   windowTo: '2026-10-16T01:07:00Z', regionName: 'Truckee',
 };
 const house = (n: number, over: Record<string, unknown> = {}) => ({ id: id(n), address: `${n} Pine St`, town: 'Truckee', votes: 0, ...over });
@@ -145,7 +145,7 @@ Deno.test('deterministic: the same row renders byte-for-byte the same email, wha
   const row: DigestRecipient = {
     run_id: id(900), user_id: id(901), email: 'p@example.test', idempotency_key: `digest:${id(902)}:a/b`, window_to: '2026-10-16T01:07:00Z',
     public_id: id(902), token_version: 3, region_slug: 'truckee', region_name: 'Truckee', timezone: 'America/Los_Angeles', cadence: 'daily',
-    season: 'halloween', season_year: 2026, season_opener: true,
+    season: 'halloween', season_year: 2026, season_opener: true, want_houses: true, want_events: true,
     houses: [house(1, { votes: 2 })], house_total: 1, events: [event(1, { far: true })], event_total: 1, payload: null,
   };
   const cfg = (t: string): RunConfig => ({
@@ -170,4 +170,19 @@ Deno.test('dueKinds: only the 18:xx-19:xx Pacific slot runs, Thursday adds weekl
   assertEquals(dueKinds(new Date('2026-07-10T02:57:00Z')).kinds, ['daily', 'weekly']);
   assertEquals(dueKinds(new Date('2026-07-10T03:07:00Z')).kinds, []);
   assertEquals(pacificParts(new Date('2026-12-05T08:30:00Z')).hour, 0);
+});
+
+Deno.test('footer names the subscriber\'s actual topics and cadence in both parts', () => {
+  const cases: Array<[boolean, boolean, 'daily' | 'weekly', string]> = [
+    [true, false, 'daily', 'You’re getting this daily email because you subscribed to new houses around Truckee.'],
+    [false, true, 'weekly', 'You’re getting this weekly email because you subscribed to new events around Truckee.'],
+    [true, true, 'weekly', 'You’re getting this weekly email because you subscribed to new houses and events around Truckee.'],
+  ];
+  for (const [wantHouses, wantEvents, cadence, line] of cases) {
+    const r = renderDigest({ ...base, wantHouses, wantEvents, cadence, houses: [house(1)], events: [event(1)], housesTotal: 1, eventsTotal: 1 })!;
+    assertStringIncludes(r.html, line);
+    assertStringIncludes(r.text, line);
+  }
+  const h = renderDigest({ ...base, wantHouses: true, wantEvents: false, houses: [house(1)], events: [], housesTotal: 1, eventsTotal: 0 })!;
+  assert(!h.html.includes('houses and events around') && !h.text.includes('houses and events around'));
 });

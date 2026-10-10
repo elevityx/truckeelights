@@ -36,6 +36,9 @@ export interface DigestRecipient {
   season_year: number;
   /** True when the subscriber's last SENT digest was another season (or none): the email gets the header band. */
   season_opener: boolean;
+  /** The subscriber's topics on the subscription (houses, events, or both): the footer names what they chose. */
+  want_houses: boolean;
+  want_events: boolean;
   houses: DigestHouse[];
   house_total: number;
   events: DigestEvent[];

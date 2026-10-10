@@ -44,7 +44,7 @@ The digest's provider idempotency key is stored per content window (`digest:<pub
 
 ### Retention (Subscribe v1)
 
-`private.sweep_subscribe` runs daily: house-link email hashes are deleted after a day (they are usable for one hour), a stored digest email is cleared when its row is marked sent or failed (the sweep clears any left on a row idle for 2 days), digest run and send records after 60 days, and resolved claims and removal requests after 180 days. Account deletion removes the account's rows at once through the Auth delete.
+`private.sweep_subscribe` runs daily: house-link email hashes are deleted after a day (they are usable for one hour), a stored digest email is cleared when its row is marked sent or failed (the sweep never clears a still-`sending` row's email: a `sending` row idle for 2 days is first closed as failed with the code `abandoned`, and then its email is cleared), digest run and send records after 60 days, and resolved claims and removal requests after 180 days. Account deletion removes the account's rows at once through the Auth delete.
 
 ## Front-end layout
 
