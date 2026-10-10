@@ -20,7 +20,7 @@ import {
 
 const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const H = (n: number): Stop => ({ kind: 'house', id: uid(n) });
-const E = (n: number): Stop => ({ kind: 'event', id: uid(n) });
+const E = (n: number) => ({ kind: 'event', id: uid(n) }); // events are not route stops; only used to prove they are dropped
 
 function memStore(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
@@ -44,8 +44,11 @@ describe('storage', () => {
 
   it('round-trips through storage', () => {
     const s = memStore();
-    saveStops('k', [H(1), E(2)], () => s);
-    expect(loadStops('k', () => s)).toEqual([H(1), E(2)]);
+    saveStops('k', [H(1), H(2)], () => s);
+    expect(loadStops('k', () => s)).toEqual([H(1), H(2)]);
+    // a stored route from before houses-only drops its event stops quietly
+    const old = memStore({ k: JSON.stringify([H(1), E(2), H(3)]) });
+    expect(loadStops('k', () => old)).toEqual([H(1), H(3)]);
     saveStops('k', [], () => s);
     expect(s.m.has('k')).toBe(false);
   });
@@ -69,14 +72,14 @@ describe('storage', () => {
   });
 
   it('drops duplicates', () => {
-    expect(cleanStops([H(1), H(1), E(1), { kind: 'house', id: uid(1).toUpperCase() }])).toEqual([H(1), E(1)]);
+    expect(cleanStops([H(1), H(1), E(1), { kind: 'house', id: uid(1).toUpperCase() }])).toEqual([H(1)]);
   });
 });
 
 describe('editing', () => {
   it('toggles and stops at the cap', () => {
     expect(toggleStop([], H(1))).toEqual({ stops: [H(1)], result: 'added' });
-    expect(toggleStop([H(1), E(2)], H(1))).toEqual({ stops: [E(2)], result: 'removed' });
+    expect(toggleStop([H(1), H(2)], H(1))).toEqual({ stops: [H(2)], result: 'removed' });
     const full = Array.from({ length: MAX_STOPS }, (_, i) => H(i));
     expect(toggleStop(full, H(99)).result).toBe('full');
     expect(toggleStop(full, H(3)).result).toBe('removed');
@@ -92,8 +95,8 @@ describe('editing', () => {
 
 describe('dropping stale stops', () => {
   it('keeps only stops still on the map', () => {
-    const live = { houses: new Set([uid(1), uid(3)]), events: new Set([uid(2)]) };
-    expect(pruneStops([H(1), H(2), E(2), E(3), H(3)], live)).toEqual({ stops: [H(1), E(2), H(3)], dropped: 2 });
+    const live = { houses: new Set([uid(1), uid(3)]) };
+    expect(pruneStops([H(1), H(2), H(3)], live)).toEqual({ stops: [H(1), H(3)], dropped: 1 });
     expect(pruneStops([], live)).toEqual({ stops: [], dropped: 0 });
   });
   it('words the toast', () => {
@@ -104,21 +107,22 @@ describe('dropping stale stops', () => {
 
 describe('share link', () => {
   it('builds a readable link on the site', () => {
-    expect(routeShareUrl('https://truckeelights.com/', [H(1), E(2)])).toBe(
-      `https://truckeelights.com/?route=house:${uid(1)},event:${uid(2)}`,
+    expect(routeShareUrl('https://truckeelights.com/', [H(1), H(2)])).toBe(
+      `https://truckeelights.com/?route=house:${uid(1)},house:${uid(2)}`,
     );
     expect(routeShareUrl(undefined, [H(1)])).toBe(`https://truckeelights.com/?route=house:${uid(1)}`);
   });
 
   it('parses its own link back, through URL decoding', () => {
-    const url = new URL(routeShareUrl('https://truckeelights.com', [H(1), E(2), H(3)]));
-    expect(parseRouteParam(url.searchParams.get('route'))).toEqual([H(1), E(2), H(3)]);
+    const url = new URL(routeShareUrl('https://truckeelights.com', [H(1), H(2), H(3)]));
+    expect(parseRouteParam(url.searchParams.get('route'))).toEqual([H(1), H(2), H(3)]);
   });
 
   it('validates: junk entries skipped, duplicates dropped, capped, null when absent', () => {
     expect(parseRouteParam(null)).toBeNull();
     expect(parseRouteParam('')).toEqual([]);
-    expect(parseRouteParam(`house:${uid(1)},house:${uid(1)},bogus,event:<script>,party:${uid(2)},event:${uid(2)}`)).toEqual([H(1), E(2)]);
+    expect(parseRouteParam(`house:${uid(1)},house:${uid(1)},bogus,event:<script>,party:${uid(2)},event:${uid(2)},house:${uid(2)}`)).toEqual([H(1), H(2)]);
+    expect(parseRouteParam(`event:${uid(2)}`)).toEqual([]);
     const long = Array.from({ length: 30 }, (_, i) => `house:${uid(i)}`).join(',');
     expect(parseRouteParam(long)).toHaveLength(MAX_STOPS);
   });
@@ -126,8 +130,8 @@ describe('share link', () => {
   it('decides whether to load, open, or ask before replacing', () => {
     expect(shareDecision([], [H(1)])).toBe('load');
     expect(shareDecision([H(1)], [])).toBe('none');
-    expect(shareDecision([H(1), E(2)], [H(1), E(2)])).toBe('same');
-    expect(shareDecision([H(1), E(2)], [E(2), H(1)])).toBe('ask');
+    expect(shareDecision([H(1), H(2)], [H(1), H(2)])).toBe('same');
+    expect(shareDecision([H(1), H(2)], [H(2), H(1)])).toBe('ask');
     expect(shareDecision([H(1)], [H(1), H(2)])).toBe('ask');
   });
 });
@@ -148,16 +152,11 @@ describe('nearbyHouses', () => {
 });
 
 describe('degraded loads never prune', () => {
-  const houses = new Set([uid(1)]);
-  it('keeps every event stop when events failed to load', () => {
-    const r = pruneStops([H(1), H(9), E(2), E(3)], { houses, events: null });
-    expect(r).toEqual({ stops: [H(1), E(2), E(3)], dropped: 1 });
+  it('keeps every stop when houses failed to load', () => {
+    expect(pruneStops([H(1), H(9)], { houses: null })).toEqual({ stops: [H(1), H(9)], dropped: 0 });
   });
-  it('keeps house stops when houses are unavailable, and prunes events normally after a good load', () => {
-    expect(pruneStops([H(5), E(2)], { houses: null, events: new Set() })).toEqual({ stops: [H(5)], dropped: 1 });
-  });
-  it('an empty but successful events load still prunes', () => {
-    expect(pruneStops([E(2)], { houses, events: new Set() })).toEqual({ stops: [], dropped: 1 });
+  it('an empty but successful houses load still prunes', () => {
+    expect(pruneStops([H(2)], { houses: new Set() })).toEqual({ stops: [], dropped: 1 });
   });
 });
 
@@ -172,8 +171,8 @@ describe('late location answers', () => {
     expect(appendStops([H(1), H(2)], [H(2), H(3)])).toEqual([H(1), H(2), H(3)]);
   });
   it('reorder does not resurrect a stop removed meanwhile, and keeps hidden stops', () => {
-    // Latest route: H1, E7 (event source down, so hidden), H3. H2 was removed while pending.
-    const latest = [H(1), E(7), H(3)];
-    expect(withHidden(latest, [H(3), H(1)])).toEqual([H(3), H(1), E(7)]);
+    // Latest route: H1, H7 (not shown right now, so hidden), H3. H2 was removed while pending.
+    const latest = [H(1), H(7), H(3)];
+    expect(withHidden(latest, [H(3), H(1)])).toEqual([H(3), H(1), H(7)]);
   });
 });

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import EventGlyph from '@/components/events/EventGlyph';
 import Glyph from '@/components/list/Glyph';
 import { DownIcon, ShareIcon, UpIcon, XIcon } from '@/components/shell/Icons';
 import Sheet from '@/components/ui/Sheet';
@@ -87,7 +86,7 @@ export default function RoutePanel({ route, season, year, onClose }: Props) {
 
         <div className="sec">
           {n === 0 ? (
-            <p className="nophotos">Tap “Add to route” on a house or event, or add the houses near you.</p>
+            <p className="nophotos">Tap “Add to route” on a house, or add the houses near you.</p>
           ) : (
             <ol className="rstops" aria-label="Stops in order">
               {views.map((v, i) => {
@@ -97,11 +96,11 @@ export default function RoutePanel({ route, season, year, onClose }: Props) {
                     <span className="rn" aria-hidden="true">
                       {i + 1}
                     </span>
-                    <span className="g">{v.kind === 'house' ? <Glyph name={pickGlyph(v.id, season)} /> : <EventGlyph season={season} />}</span>
+                    <span className="g"><Glyph name={pickGlyph(v.id, season)} /></span>
                     <span className="rt">
                       <b>{v.title}</b>
                       <small>
-                        {v.kind === 'event' ? `Event${v.sub ? ` · ${v.sub}` : ''}` : 'House'}
+                        House
                         {next && ` · ${formatDistance(haversine(v, next))} to next`}
                       </small>
                     </span>
@@ -116,11 +115,9 @@ export default function RoutePanel({ route, season, year, onClose }: Props) {
                         <XIcon />
                       </button>
                     </span>
-                    {v.kind === 'house' && (
-                      <a className="rown" href={REMOVE_HOUSE_URL} target="_blank" rel="noopener noreferrer">
-                        Is this your house? Remove it
-                      </a>
-                    )}
+                    <a className="rown" href={REMOVE_HOUSE_URL} target="_blank" rel="noopener noreferrer">
+                      Is this your house? Remove it
+                    </a>
                   </li>
                 );
               })}

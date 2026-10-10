@@ -3,7 +3,7 @@
 import { CheckIcon, PlusIcon, RouteIcon } from '@/components/shell/Icons';
 import './route.css';
 
-/** "+ Add to route" / "✓ In route" on the house and event sheets. */
+/** "+ Add to route" / "✓ In route" on the house sheet. */
 export function RouteToggle({ inRoute, onToggle }: { inRoute: boolean; onToggle(): void }) {
   return (
     <button type="button" className={`btn ${inRoute ? 'ghost rin' : 'alt'} rtoggle`} aria-pressed={inRoute} onClick={onToggle}>

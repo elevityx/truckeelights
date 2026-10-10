@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { publicEnv } from '@/config/public-env';
-import type { PinView, PublicEvent, Season } from '@/lib/data/types';
+import type { PinView, Season } from '@/lib/data/types';
 import { firstSegment } from '@/lib/text/address';
 import type { Point } from '@/lib/route/geo';
 import type { TravelMode } from '@/lib/route/mapsUrl';
@@ -61,7 +61,6 @@ export const defaultMode = (season: Season): TravelMode => (season === 'hallowee
 interface Args {
   season: Season | null;
   pins: PinView[];
-  events: PublicEvent[];
   toast(msg: string): void;
   /** The map camera's center, when there is a map. */
   mapCenter(): Point | null;
@@ -69,7 +68,7 @@ interface Args {
   regionCenter: Point | null;
 }
 
-export function useRoute({ season, pins, events, toast, mapCenter, regionCenter }: Args) {
+export function useRoute({ season, pins, toast, mapCenter, regionCenter }: Args) {
   const [stops, setStops] = useState<Stop[]>([]);
   const [incoming, setIncoming] = useState<Stop[] | null>(null);
   const [mode, setMode] = useState<TravelMode>('walking');
@@ -87,25 +86,19 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
   }, []);
 
   /**
-   * Call once the season's houses and events are loaded. Restores the saved route (dropping stops that are no longer
-   * public) and reads a shared `?route=` link. `loaded` says which kinds were fetched successfully: stops of a kind that
-   * failed to load are kept, never pruned. Returns true when the route panel should open.
+   * Call once the season's houses are loaded. Restores the saved route (dropping stops that are no longer
+   * public) and reads a shared `?route=` link. Houses are the only stops; `event:` entries are dropped quietly. Returns true when the route panel should open.
    */
   const init = useCallback(
     (
       s: Season,
       y: number,
       livePins: PinView[],
-      liveEvents: PublicEvent[],
       search: string,
-      loaded: { houses: boolean; events: boolean } = { houses: true, events: true },
     ): boolean => {
       keyRef.current = routeKey(s, y);
       setMode(defaultMode(s));
-      const live = {
-        houses: loaded.houses ? new Set(livePins.map((p) => p.id)) : null,
-        events: loaded.events ? new Set(liveEvents.map((e) => e.id)) : null,
-      };
+      const live = { houses: new Set(livePins.map((p) => p.id)) };
       const saved = pruneStops(loadStops(keyRef.current, localStore), live);
       commit(saved.stops);
       if (saved.dropped > 0) toast(droppedToast(saved.dropped));
@@ -151,19 +144,13 @@ export function useRoute({ season, pins, events, toast, mapCenter, regionCenter 
 
   const views = useMemo<RouteStopView[]>(() => {
     const ph = new Map(pins.map((p) => [p.id, p]));
-    const pe = new Map(events.map((e) => [e.id, e]));
     const out: RouteStopView[] = [];
     for (const s of stops) {
-      if (s.kind === 'house') {
-        const p = ph.get(s.id);
-        if (p) out.push({ kind: 'house', id: p.id, lat: p.lat, lng: p.lng, title: firstSegment(p.address), sub: '' });
-      } else {
-        const e = pe.get(s.id);
-        if (e) out.push({ kind: 'event', id: e.id, lat: e.lat, lng: e.lng, title: e.title, sub: e.venue ?? firstSegment(e.address) });
-      }
+      const p = ph.get(s.id);
+      if (p) out.push({ kind: 'house', id: p.id, lat: p.lat, lng: p.lng, title: firstSegment(p.address), sub: '' });
     }
     return out;
-  }, [stops, pins, events]);
+  }, [stops, pins]);
 
   const viewsRef = useRef<RouteStopView[]>([]);
   useEffect(() => {
