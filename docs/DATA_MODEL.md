@@ -26,10 +26,10 @@ A single row naming the default region (`default_region_id`, not null). A trigge
 Display wordmark per `(region, season)`.
 
 ### `public.site_settings`
-One row per region: `active_season`, `active_year`, `submissions_open` (default false), `photos_open` (default **false**, fail-closed), `votes_open` (default true; the per-region voting kill switch), `events_open` (default **false**; gates event submissions only, not reads), `updated_at`, `updated_by`.
+One row per region: `active_season`, `active_year`, `submissions_open` (default false), `photos_open` (default **false**, fail-closed), `votes_open` (default true; the per-region voting kill switch), `events_open` (default **false**; gates event submissions only, not reads), `subscribe_open` (default **false**; the Subscribe UI capability, see below), `updated_at`, `updated_by`.
 
 ### `public.houses`
-`region_id`, `season`, `year`, `place_id`, `address`, `normalized_address`, `lat`, `lng`, `coord_source`, `status`, moderation fields (`hidden_reason`, `moderated_by/at`, `released_at`), `created_by`, and optional legacy import keys. Unique keys per `(region, season, year)` on `place_id` and on `normalized_address` de-duplicate in the database. A user-confirmed coordinate requires a `place_id`.
+`region_id`, `season`, `year`, `place_id`, `address`, `normalized_address`, `lat`, `lng`, `coord_source`, `status`, moderation fields (`hidden_reason`, `moderated_by/at`, `released_at`), `created_by`, and optional legacy import keys. Unique keys per `(region, season, year)` on `place_id` and on `normalized_address` de-duplicate in the database. A user-confirmed coordinate requires a `place_id`. `owner_id` / `owner_since` (one owner per house; no API grant, read only through `my_account`) record who manages the listing. A house added by a signed-in, non-anonymous account is owned by it from the start (`submit_house`). Release, `admin_clear_owner`, and account deletion (the FK's `on delete set null`) clear them; a trigger keeps `owner_since` null whenever `owner_id` is.
 
 ### `public.admins`
 `user_id`, optional `region_id` (null means all regions), `note`. RLS on, no policy, no grant: only security-definer functions read it.
@@ -46,8 +46,20 @@ The vote ledger (house, region, season, year, device uid, optional photo, region
 ### `public.events`
 Community-submitted seasonal events: `region_id`, `season`, `year`, `title`, `description` (newlines kept), optional `venue`, `address` (a place name or street address), optional `place_id`, `lat`, `lng`, `starts_at`, optional `ends_at`, optional `url`, `adults_only`, `status` (`event_status`), `source` (`community` or `seed`), admin-only `source_url`, `reject_reason`, `created_by`, moderation fields, and two trigger-derived columns: `normalized_title` (lowercase, `[a-z0-9 ]` only) and `start_day` (the start date in the region's timezone). A partial unique index on `(region, season, year, normalized_title, starts_at)` where the status is not `rejected` de-duplicates on the exact start instant; a rejection frees the slot. Same-day matches are an admin warning, not a block. Coordinates of a visitor submission must be inside the region's local event area: the bounding box widened by 0.05° on every side and 0.10° on the east edge (`private.event_bounds`). Admin create and update use a wider admin area, `private.event_bounds_admin` (bbox −0.06° south, +0.15° north, −0.05° west, +0.38° east; for Truckee it reaches Reno and Carson City), which is also the trigger backstop for every write. The client labels an event outside the local area "Worth the drive"; there is no column for it. URLs must be plain `https://` links to a DNS host (no userinfo, port, IP literal, localhost, or link shortener). FORCE RLS; rejected rows are deleted 30 days after moderation.
 
+### `public.subscriptions`
+One row per account (`user_id`): `region_id`, topics `houses` / `events` (at least one), `cadence` (`daily` or `weekly`), `status` (`active` or `stopped`), a random `public_id` and a `token_version` for emailed links (a link never carries the user id; a resubscribe bumps the version and kills every older link, deleting the account deletes the row; stopping does not bump it, so a retried one-click stop still answers "already stopped"), `confirmed_at`, `stopped_at`, `last_sent_through` (the digest high-water mark; it advances only after a send succeeds), and `last_digest_season` / `last_digest_year` (both or neither: the season of the last digest actually sent, advanced by `svc_digest_mark` on `sent` and never moved back to an older season; a digest for another season is a season opener). FORCE RLS, no grants, no policies: read through `my_account`, written through `set_subscription` / `stop_subscription` and the `svc_unsubscribe_*` routines.
+
+### `public.house_claims`
+Claims (`kind = 'claim'`: "this house is mine") and removal requests (`kind = 'removal'`, owner only) in one table and one admin queue: `house_id`, `user_id`, optional `note` (≤ 300, no `<>`), `status` (`pending`, `approved`, `rejected`, `withdrawn`), `reason`, resolution fields. Partial unique indexes: one pending claim per house, one pending claim per user, one pending removal per house. FORCE RLS, no grants, no policies.
+
+### `private.house_links`
+Before an anonymous device signs in with email, it stores `sha256(lower(trim(email)))` with its anonymous uid for 1 hour. After verification, `complete_house_link` matches the account's **confirmed** email and moves the device's unowned houses to it, once. Repeating `begin_house_link` for the same device and email never extends a live link. Kept a day for the per-email limit, then swept.
+
+### `private.digest_runs` and `private.digest_sends`
+One run per `(kind, Pacific date)` with a fixed `window_to`; one send row per `(run, user)` with status `sending`, `sent` or `failed`, `attempts`, and a short `error_code` only (no provider text). Each send row stores its provider idempotency key, `digest:<public_id>:<window_from>/<window_to>` (`window_from` is the subscription's `last_sent_through` when claimed, `window_to` the claiming run's window end), with `window_from` / `window_to`, `season` / `season_year` (both or neither: the region's active season when the row was claimed, kept for the row's life so a resume renders the same season), and `payload`: the exact rendered email (from, to, subject, html, text, headers), stored once by `svc_digest_store_payload` before the provider call. Every retry of the row reuses the key and sends the stored payload verbatim, including a later run's resume of an unresolved `sending` row; a failed row is never reused (the next run's row has a new key). The payload is cleared when the row is marked `sent` or `failed`, and the daily sweep never clears a `sending` row's payload: it first closes a `sending` row idle for 2 days as `failed` with `error_code` `abandoned` (a later run claims a new row with a new key), then clears the payload. `app_settings.digest_daily_cap` (default 500, no API grant) caps new digest claims per UTC day across both run kinds: a row is charged once, to the day it was claimed (`sent` or still `sending`; a definite failure frees its slot), resuming a row needs no room, and the count-and-claim runs under one advisory lock per day.
+
 ### `private.quota_events`
-An append-only ledger used for rate limits. Kinds: `house`, `photo_reserve`, `photo_confirm`, `event`. Rows are pruned after 48 hours.
+An append-only ledger used for rate limits. Kinds: `house`, `photo_reserve`, `photo_confirm`, `event`, `subscribe`, `claim`, `owner_vis`. Rows are pruned after 48 hours.
 
 ### `private.blocked_terms`
 Terms rejected in addresses.
@@ -77,7 +89,7 @@ Callable by anonymous and signed-in users:
 
 | Function | Purpose |
 | :--- | :--- |
-| `get_region_context(slug)` | Region, brand, active season, the submissions and photos switches, and `events: {open}` (a missing key means a database without events) |
+| `get_region_context(slug)` | Region, brand, active season, the submissions and photos switches, `events: {open}` (a missing key means a database without events), and `subscribe: {open}` (same rule; the Subscribe UI shows only when it is true) |
 
 Callable by signed-in users (anonymous sessions included):
 
@@ -87,6 +99,18 @@ Callable by signed-in users (anonymous sessions included):
 | `reserve_photo(house_id)` | Returns `photo_id` and `upload_path`; fails when photos are closed or limits are hit |
 | `confirm_photo_upload(photo_id)` | Returns `pending` or `over_cap` |
 | `submit_event(region_slug, title, description, venue, address, place_id, lat, lng, starts_at, ends_at, url, adults_only)` | Validate, de-duplicate, rate-limit, cap the pending queue, insert as `pending`. Returns `created` (with id) or `exists` (id only when the existing event is approved) |
+
+Callable by signed-in, **non-anonymous** accounts (email OTP). A user listed in `admins` must be at AAL2. `begin_house_link` is the exception: anonymous sessions only.
+
+| Function | Purpose |
+| :--- | :--- |
+| `set_subscription(region_slug, houses, events, cadence)` | Create or change the subscription (idempotent; reactivates a stopped one). 10 per day |
+| `stop_subscription()` | Stop emails (the links stay recognisable, so a repeated stop is harmless) |
+| `my_account()` | Email, subscription, owned houses (status, owner-hidden flag, votes, approved photo count, removal pending), pending claims |
+| `claim_my_submissions()` | Own the unowned houses this same account added (houses added while signed in are already owned by `submit_house`) |
+| `begin_house_link(email)` / `complete_house_link()` | Link this device's houses to whoever verifies the email (see `private.house_links`) |
+| `request_house_claim(house_id, note)` / `request_house_removal(house_id, note)` / `withdraw_house_claim(claim_id)` | Claims (visible, active-season houses; owned ones too) and owner removal requests; 3 per day together |
+| `owner_set_house_visibility(house_id, visible)` | Owner hide (only a visible house) and unhide (only an owner-hidden one), through the same hide routine as the admin; 3 changes per house per day |
 
 Callable by signed-in users and checked inside for an AAL2 admin of the region:
 
@@ -106,8 +130,14 @@ Callable by signed-in users and checked inside for an AAL2 admin of the region:
 | `admin_approve_photo(photo_id, public_path)` | Single-statement approve |
 | `admin_reject_photo(photo_id)` / `admin_revoke_photo(photo_id)` | Reject or revoke |
 | `admin_storage_jobs(region_id)` / `admin_complete_storage_job(job_id)` | Fallback listing and server-verified completion |
+| `admin_claim_queue(region_id, status)` / `admin_resolve_claim(claim_id, approve, reason)` | Claims tab: masked claimant and current owner only (never an address). Approving a claim sets (or replaces) the owner; approving a removal releases the house through the same routine as `admin_release_house` |
+| `admin_clear_owner(house_id)` | Remove the owner; the listing stays |
+| `admin_subscriber_counts(region_id)` / `admin_digest_today()` | Overview counts; today's digest emails against `digest_daily_cap` (digest mail only; any AAL2 admin) |
+| `admin_set_subscribe_open(region_id, open)` | Subscribe UI switch |
 
-Error codes are returned as the exception message: for example `not_signed_in`, `rate_limited`, `invalid_input`, `photo_expired`, `upload_missing`, `not_pending`, `not_approved`, `invalid_image`, `photos_closed`, `queue_full`, `exists`. Event validation fails with `invalid_input` and the field name as the detail.
+Executable by `service_role` only (Edge Functions): `svc_digest_start(kind, run_date)`, `svc_digest_batch(run_id, limit)` (resumes unresolved `sending` rows with their stored run, key, window and payload, then claims new recipients; returns content, run id and idempotency key; stops at the cap; also the row's `season`, `season_year` and `season_opener`, the subscription's topics (`want_houses`, `want_events`, for the email footer), per house `town` and `votes`, per event `town` and `far` (outside `private.event_bounds`); `town` comes from the pure helper `private.town_from_address`, the word-only component after the street, else null), `svc_digest_store_payload(run_id, user_id, subject, html, text, from, to, headers)` (stores the rendered email on a `sending` row once; the same payload again is a no-op, a different one raises `payload_conflict`), `svc_digest_mark(run_id, user_id, ok, error_code)` (definite outcomes only; clears the payload; on `sent` advances `last_sent_through` and `last_digest_season/year`), `svc_digest_finish(run_id)`, `svc_unsubscribe_lookup / _stop / _set_prefs(public_id, version, …)` (`_stop` returns `stopped`, `already_stopped` or `invalid`), `svc_delete_account_check(user_id)` (read-only: `forbidden` for admins, `gone`, or `ok`; called before the Auth delete) and `svc_delete_account(user_id)` (idempotent cleanup after the Auth delete; refuses while the Auth user exists).
+
+Error codes are returned as the exception message: for example `not_signed_in`, `rate_limited`, `invalid_input`, `photo_expired`, `upload_missing`, `not_pending`, `not_approved`, `invalid_image`, `photos_closed`, `queue_full`, `exists`, `already_owned`, `claim_pending`. Event validation fails with `invalid_input` and the field name as the detail.
 
 ## Quotas
 
@@ -119,6 +149,10 @@ Limits are counted from the append-only ledger under advisory locks (keys are pr
 | Reserve a photo | 10 per hour, and 3 live reservations at once | | 200 per hour |
 | Confirm a photo | | at most 20 pending | 100 per hour |
 | Submit an event | 3 per hour and 6 per 24 hours | | 30 per 10 minutes; at most 40 pending events (`queue_full`) |
+| Save subscription choices | 10 per 24 hours | | |
+| Claim or request removal | 3 per 24 hours (together) | | |
+| Owner hide / unhide | | 3 per 24 hours | |
+| House link (anonymous device) | 3 live links per device; 5 per email per 24 hours | | |
 
 Reservations expire after 15 minutes. A confirm over a cap commits the photo as `expired` and queues deletion of the upload.
 

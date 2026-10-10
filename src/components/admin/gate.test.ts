@@ -26,6 +26,15 @@ describe('decideScreen', () => {
     expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: false })).toBe('not_admin');
     expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: null })).toBe('not_admin');
   });
+  it('recovery link: aal2 without admin rights (email-code amr) -> recovery screen, never the console', () => {
+    expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: false, recovery: true })).toBe('recovery');
+    expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: null, recovery: true })).toBe('recovery');
+    // the authenticator challenge still comes first, and no session still means login
+    expect(decideScreen({ ...base, next: 'aal2', recovery: true })).toBe('mfa');
+    expect(decideScreen({ hasUser: false, current: null, next: null, isAdmin: null, recovery: true })).toBe('login');
+    // a real admin session (password + totp) still opens the console
+    expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: true, recovery: true })).toBe('console');
+  });
   it('aal2 admin -> console', () => {
     expect(decideScreen({ hasUser: true, current: 'aal2', next: 'aal2', isAdmin: true })).toBe('console');
   });

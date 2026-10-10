@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:functions": "deno test --config supabase/functions/deno.json supabase/functions",
     "db:start": "sh supabase/start-local.sh",
     "db:reset": "supabase db reset && sh supabase/storage-jobs-local.sh",
     "db:test": "supabase test db",

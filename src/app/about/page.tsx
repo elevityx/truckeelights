@@ -136,6 +136,8 @@ export default function AboutPage() {
         <nav className="about-foot" aria-label="More">
           <Link href="/">The map</Link>
           <span aria-hidden="true">·</span>
+          <Link href="/privacy/">Privacy</Link>
+          <span aria-hidden="true">·</span>
           <a href={REPO_URL} target="_blank" rel="noopener">
             Open source on GitHub
           </a>

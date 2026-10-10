@@ -10,6 +10,9 @@ import { reverseGeocode } from '@/lib/maps/geocode';
 import { findNearbyDuplicate, mapPickMessage, pickStreetResult } from '@/lib/maps/mapPick';
 import { createAddressPicker, createPinConfirm } from '@/lib/maps/picker';
 import type { PickedPlace } from '@/lib/maps/types';
+import { AccountNudge } from '@/components/subscribe/Nudges';
+import { markHouseAdded } from '@/components/subscribe/flow';
+import { sessionKind } from '@/lib/data/auth';
 import BotCheck from './BotCheck';
 import { BLOCKED_MESSAGE, initialState, NUDGE_MESSAGE, reducer, type Step } from './flow';
 
@@ -25,6 +28,8 @@ export interface AddHouseSheetProps {
   initialPlace?: PickedPlace;
   /** This season's houses, for the "already on the map" check after the pin moves. */
   pins: readonly PinView[];
+  /** Set only while subscriptions are open: the success card nudges an anonymous visitor to create an account. */
+  onCreateAccount?(): void;
 }
 
 const STEPS = ['Find address', 'Confirm pin', 'Bot check'] as const;
@@ -33,11 +38,12 @@ function latlng(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, onAddPhotos, initialPlace, pins }: AddHouseSheetProps) {
+export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting, onAddPhotos, initialPlace, pins, onCreateAccount }: AddHouseSheetProps) {
   const [s, dispatch] = useReducer(reducer, initialPlace, (p) => (p ? reducer(initialState, { type: 'picked', place: p }) : initialState));
   const [token, setToken] = useState('');
   const [session, setSession] = useState<boolean | null>(null);
   const [placed, setPlaced] = useState(false); // pin dragged on the map
+  const [nudge, setNudge] = useState(false); // post-add "Create a free account" (anonymous sessions only)
   const { region, season } = ctx;
   const seasonLabel = season === 'halloween' ? 'Halloween' : 'Christmas';
 
@@ -129,6 +135,10 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
         lng: s.lng,
       });
       dispatch({ type: 'submitDone', result: r });
+      if (r.result === 'created') {
+        markHouseAdded(() => window.localStorage);
+        if (onCreateAccount) setNudge((await sessionKind()) === 'anonymous');
+      }
     } catch (e) {
       const err = toDataError(e);
       if (err.code === 'captcha_failed') setToken('');
@@ -157,6 +167,7 @@ export default function AddHouseSheet({ ctx, onClose, onCreated, onOpenExisting,
             See it on the map
           </button>
         </div>
+        {nudge && onCreateAccount && <AccountNudge onCreate={onCreateAccount} onDismiss={() => setNudge(false)} />}
       </div>
     );
   } else if (res?.kind === 'exists') {

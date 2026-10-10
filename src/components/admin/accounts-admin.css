@@ -1,0 +1,20 @@
+.cl-sec{display:flex; flex-direction:column; gap:12px}
+.cl-card .btn{min-height:44px}
+.cl-title{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.cl-title .addr{flex:1 1 auto}
+.cl-kv{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0}
+.cl-kv dt{color:var(--muted); font-size:14px}
+.cl-kv dd{margin:0; overflow-wrap:anywhere}
+.cl-kv dd.mask{font-variant-ligatures:none; font-weight:700}
+.cl-note{margin:0; white-space:pre-wrap; overflow-wrap:anywhere}
+.pill.warn{border-color:#d98a00}
+.pill.bad{border-color:var(--danger)}
+.ov-tiles{display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin:0}
+.ov-tiles div{padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--surface); display:flex; flex-direction:column; gap:4px}
+.ov-tiles dt{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em}
+.ov-tiles dd{margin:0; font-size:24px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1}
+.ov-bar{height:10px; border-radius:99px; background:var(--bg); border:1px solid var(--line); overflow:hidden}
+.ov-bar i{display:block; height:100%; background:var(--accent-2)}
+.ov-bar.warn i{background:#d98a00}
+.ov-bar.full i{background:var(--danger)}
+.ov-use{display:flex; justify-content:space-between; gap:8px; font-variant-numeric:tabular-nums}

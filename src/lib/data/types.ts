@@ -23,6 +23,7 @@ export interface RegionContext {
   photosOpen: boolean;
   votesOpen: boolean;
   events?: { open: boolean }; // undefined = DB without events
+  subscribe?: { open: boolean }; // undefined = DB without subscriptions; the Subscribe UI stays hidden
 }
 export interface Badge {
   kind: string;
@@ -82,6 +83,10 @@ export type DataErrorCode =
   | 'votes_closed'
   | 'queue_full'
   | 'exists'
+  | 'already_owned'
+  | 'claim_pending'
+  | 'token_invalid'
+  | 'token_expired'
   | 'auth_failed'
   | 'network'
   | 'unknown';
@@ -157,3 +162,71 @@ export interface AdminEvent extends PublicEvent { status: EventStatus; source: '
 export interface EventInput { title: string; description: string; venue: string | null; address: string;
   placeId: string | null; lat: number; lng: number; startsAt: string; endsAt: string | null;
   url: string | null; adultsOnly: boolean; }
+
+// Subscribe + Accounts v1 (owner: sub/db). Raw RPC shapes are mapped in account.ts / adminAccounts.ts.
+export type SubscriptionCadence = 'daily' | 'weekly';
+export type SubscriptionStatus = 'active' | 'stopped';
+export interface SubscriptionPrefs {
+  houses: boolean;
+  events: boolean; // at least one of houses / events
+  cadence: SubscriptionCadence;
+}
+export interface Subscription extends SubscriptionPrefs {
+  regionSlug: string;
+  status: SubscriptionStatus;
+  confirmedAt: string | null;
+}
+export type ClaimKind = 'claim' | 'removal';
+export type ClaimStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
+export interface OwnedHouse {
+  id: string;
+  address: string;
+  status: HouseStatus; // 'visible' | 'hidden' (released houses lose their owner)
+  /** Hidden by the owner (can unhide). Hidden by an admin -> false, and the owner cannot unhide. */
+  hiddenByOwner: boolean;
+  votes: number;
+  approvedPhotos: number;
+  removalPending: boolean;
+}
+export interface MyClaim {
+  id: string;
+  kind: ClaimKind;
+  houseId: string;
+  address: string;
+  status: 'pending';
+  createdAt: string;
+}
+export interface MyAccount {
+  email: string;
+  subscription: Subscription | null;
+  houses: OwnedHouse[];
+  claims: MyClaim[]; // pending claims and removal requests only
+}
+export interface AdminClaim {
+  id: string;
+  kind: ClaimKind;
+  houseId: string;
+  address: string;
+  houseStatus: HouseStatus;
+  claimantMasked: string; // e.g. "s•••@gmail.com", masked server-side
+  currentOwnerMasked: string | null;
+  note: string | null;
+  status: ClaimStatus;
+  reason: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+export interface SubscriberCounts {
+  active: number;
+  stopped: number;
+  daily: number; // active only, here and below
+  weekly: number;
+  houses: number;
+  events: number;
+}
+export interface DigestToday {
+  sent: number; // digest emails sent today (UTC day). Digest mail only: sign-in mail is not counted.
+  failed: number;
+  cap: number; // app_settings.digest_daily_cap; the Overview warns at 80% of it
+  capHit: boolean;
+}

@@ -1,4 +1,4 @@
-export type AdminScreen = 'login' | 'mfa' | 'setup' | 'not_admin' | 'console';
+export type AdminScreen = 'login' | 'mfa' | 'setup' | 'not_admin' | 'recovery' | 'console';
 
 export interface AuthState {
   /** A non-anonymous session exists. A visitor's anonymous session counts as false. */
@@ -7,6 +7,11 @@ export interface AuthState {
   next: 'aal1' | 'aal2' | null;
   /** adminWhoami result; only meaningful (and only asked) at aal2. */
   isAdmin: boolean | null;
+  /**
+   * Arrived from a password-reset email (/admin/?recovery=1). That session's amr is an email code, so is_admin is false
+   * even for a real admin: show the set-a-new-password screen instead of "not an admin".
+   */
+  recovery?: boolean;
 }
 
 /**
@@ -16,7 +21,7 @@ export interface AuthState {
  */
 export function decideScreen(s: AuthState): AdminScreen {
   if (!s.hasUser || s.current === null) return 'login';
-  if (s.current === 'aal2') return s.isAdmin === true ? 'console' : 'not_admin';
+  if (s.current === 'aal2') return s.isAdmin === true ? 'console' : s.recovery ? 'recovery' : 'not_admin';
   // aal1
   if (s.next === 'aal2') return 'mfa';
   return 'setup';

@@ -5,20 +5,23 @@ Truckee Lights is a community map of decorated houses. Visitors add houses and p
 ## Shape of the system
 
 - **A static, client-only site.** Next.js (App Router) is built with `output: 'export'`. Every page is a client component and loads data in effects, because the build prerenders with empty environment variables. There is **no server runtime** of our own.
-- **Supabase is the only backend**: Postgres, Auth, Storage, and one small Edge Function (`photo-urls`) that signs read URLs for approved photos. The browser talks to it directly with the public (publishable) key.
+- **Supabase is the only backend**: Postgres, Auth, Storage, and four small Edge Functions: `photo-urls` signs read URLs for approved photos, and Subscribe v1 adds `send-digest`, `unsubscribe` and `delete-account` (see below). The browser talks to Supabase directly with the public (publishable) key.
 - **Hosting** is a static host that serves `main` as production and builds branches as previews.
 
 ```
 browser (static site)
-   |  publishable key, anonymous or admin session
+   |  publishable key, anonymous / account / admin session
    v
 Supabase: Auth ---- Postgres (RLS, RPCs) ---- Storage (private buckets)
-                                  Edge Function photo-urls (signs approved reads)
+             Edge Functions: photo-urls (signs approved reads)
+                             send-digest  <- pg_cron + pg_net, Vault bearer      -> Resend
+                             unsubscribe  <- HMAC link tokens from emails
+                             delete-account <- the signed-in account's own JWT
 ```
 
 ## The trust boundary: the database enforces, the UI never does
 
-Because there is no server of ours, nothing in the browser can be trusted. Security comes only from Postgres:
+Because there is no server of ours, nothing in the browser can be trusted. Security comes from Postgres, plus the self-authenticating checks in the Edge Functions that hold the service-role key (next section):
 
 - Tables have **no write grants**. Public writes go only through a small set of `security definer` RPCs that validate input, derive the season and region on the server, and enforce rate limits.
 - Public reads use **column grants plus row-level security (RLS)**, so anonymous callers see only what a policy allows.
@@ -26,6 +29,22 @@ Because there is no server of ours, nothing in the browser can be trusted. Secur
 - Admin actions require a non-anonymous session at **AAL2** whose JWT `amr` has both a `password` and a `totp` entry (an email-code + TOTP session does not count) and a row in the `admins` table, checked inside each RPC.
 
 UI checks (button states, hidden controls) are conveniences only.
+
+### Service-role Edge Functions (Subscribe v1)
+
+Three functions run with the service-role key (function env only, never in the repo or the browser) and `verify_jwt = false`, so each authenticates its caller itself. They reach the database only through `public.svc_*` routines, which are executable by `service_role` alone (ACL test).
+
+| Function | Who may call it, and how it checks | What it may do |
+| :--- | :--- | :--- |
+| `send-digest` | pg_cron via pg_net, with a bearer from Vault compared in constant time to `DIGEST_CRON_SECRET`. `private.run_digest` posts only to exactly `https://<project host>/functions/v1/send-digest`, where the host comes from the separately trusted `storage_api_url` Vault secret | Claim, send and mark digest rows (`svc_digest_*`). Bounded: about 40 s and 100 sends per call; cron fires every 10 minutes from 18:07 to 19:57 Pacific and later ticks resume |
+| `unsubscribe` | Anyone holding an emailed link: an HMAC token `public_id.version.purpose.exp.sig` (`UNSUBSCRIBE_HMAC_SECRET`). A GET only redirects; a POST acts | Stop one subscription (idempotent: a retry answers "already stopped"), or read/change its topics with a 30-day `prefs` token |
+| `delete-account` | The signed-in account itself: the JWT is verified with Auth, the user id comes only from it, the session must be non-anonymous with an email-code sign-in under 10 minutes old. A repeat whose user is already gone (Auth verifies the token and answers `user_not_found`, and the database agrees) needs no fresh sign-in | Refuse admins (read-only check first), delete the Auth user (the database FKs remove the subscription, claims, digest records and links and unown houses in the same step), then run an idempotent cleanup. If the Auth delete errors or its response is lost, it re-checks whether the user still exists: gone means cleanup and 200, otherwise 503 `retry` (never "nothing changed"). Repeating is always safe; the browser retries twice |
+
+The digest's provider idempotency key is stored per content window (`digest:<public_id>:<window start>/<window end>`) and reused for every retry, including a later evening's resume of an ambiguous send. The rendered email is stored on the send row (`svc_digest_store_payload`) before the provider call, and a resume sends that stored email verbatim, so the provider always sees the identical request for a key whatever changed in the meantime; a row that crashed before the store is rendered fresh (the provider never saw its key). A definitely refused send is never reused: the next run's row has a new key. The daily cap counts each row once, on the UTC day it was claimed, and a resume needs no cap room. The provider dedupes a key for 24 hours, so an ambiguous send resumed more than a day later can arrive twice; that residual risk is accepted.
+
+### Retention (Subscribe v1)
+
+`private.sweep_subscribe` runs daily: house-link email hashes are deleted after a day (they are usable for one hour), a stored digest email is cleared when its row is marked sent or failed (the sweep never clears a still-`sending` row's email: a `sending` row idle for 2 days is first closed as failed with the code `abandoned`, and then its email is cleared), digest run and send records after 60 days, and resolved claims and removal requests after 180 days. Account deletion removes the account's rows at once through the Auth delete.
 
 ## Front-end layout
 

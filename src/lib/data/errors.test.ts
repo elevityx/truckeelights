@@ -106,3 +106,16 @@ describe('eventUserMessage', () => {
     expect(eventUserMessage(new DataError('network'))).toBe(userMessage(new DataError('network')));
   });
 });
+
+// Spec_Subscribe_Accounts §6: every code the subscribe/account RPCs and functions raise maps through CODES.
+describe('subscribe + account error codes', () => {
+  it.each([
+    'not_signed_in', 'forbidden', 'invalid_input', 'rate_limited', 'already_owned', 'claim_pending', 'token_invalid',
+    'token_expired',
+  ])('maps a message equal to %s', (code) => {
+    expect(toDataError({ message: code }).code).toBe(code);
+  });
+  it.each(['already_owned', 'claim_pending', 'token_invalid', 'token_expired', 'not_signed_in'] as const)('has copy for %s', (code) => {
+    expect(userMessage(new DataError(code))).not.toBe('Something went wrong. Try again.');
+  });
+});
