@@ -80,7 +80,6 @@ export default function HomePage() {
   const route = useRoute({
     season: ctx?.season ?? null,
     pins,
-    events: liveEvents,
     toast: showToast,
     mapCenter,
     regionCenter,
@@ -123,7 +122,7 @@ export default function HomePage() {
         setLayer(startLayer);
         if (evError) showToast("Couldn't load events. Houses are still here.");
         // Build my route: restore the saved stops (dropping any no longer public) and read a shared ?route= link.
-        const openRoute = routeInit(c.season, c.year, p, evs.filter((x) => notEnded(x, Date.now())), window.location.search, { houses: true, events: !evError });
+        const openRoute = routeInit(c.season, c.year, p, window.location.search);
         const h = q.get('house');
         const e = q.get('event');
         if (startLayer === 'events' && !h && !e) setFitEventsSeq((n) => n + 1);
@@ -218,7 +217,6 @@ export default function HomePage() {
   const mapEvents = useMemo(() => (showsEvents(layer) ? liveEvents : []), [layer, liveEvents]);
   const { has: routeHas, toggle: routeToggle } = route;
   const houseRows = useMemo<RowRoute>(() => ({ has: (id) => routeHas('house', id), toggle: (id) => routeToggle('house', id) }), [routeHas, routeToggle]);
-  const eventRows = useMemo<RowRoute>(() => ({ has: (id) => routeHas('event', id), toggle: (id) => routeToggle('event', id) }), [routeHas, routeToggle]);
   const openRoute = useCallback(() => {
     setSelectedId(null);
     setEventId(null);
@@ -294,7 +292,6 @@ export default function HomePage() {
               onOpen={selectEvent}
               onAdd={ctx.events.open ? () => setSheet('addEvent') : undefined}
               layerSwitch={inlineSwitch}
-              route={eventRows}
             />
           ) : (
             <ListView
@@ -315,7 +312,6 @@ export default function HomePage() {
                     onOpen={selectEvent}
                     onAdd={ctx.events.open ? () => setSheet('addEvent') : undefined}
                     onSeeAll={() => changeLayer('events')}
-                    route={eventRows}
                   />
                 ) : undefined
               }
@@ -356,7 +352,7 @@ export default function HomePage() {
         />
       )}
       {sheet === 'event' && selectedEvent && (
-        <EventSheet event={selectedEvent} season={ctx.season} year={ctx.year} tz={ctx.region.timezone} region={ctx.region} onClose={closeSheet} onToast={showToast} route={{ inRoute: route.has('event', selectedEvent.id), onToggle: () => route.toggle('event', selectedEvent.id) }} />
+        <EventSheet event={selectedEvent} season={ctx.season} year={ctx.year} tz={ctx.region.timezone} region={ctx.region} onClose={closeSheet} onToast={showToast} />
       )}
       {sheet === 'chooser' && ctx.events && (
         <AddChooser

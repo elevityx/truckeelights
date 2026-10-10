@@ -4,7 +4,7 @@ import { haversine, type Point } from './geo';
 
 // Route stops: saved on this device only (localStorage), shared as ids in a link. Never sent to our servers.
 
-export type StopKind = 'house' | 'event';
+export type StopKind = 'house';
 export interface Stop {
   kind: StopKind;
   id: string;
@@ -20,7 +20,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isStop = (x: unknown): x is Stop =>
   !!x &&
   typeof x === 'object' &&
-  ((x as Stop).kind === 'house' || (x as Stop).kind === 'event') &&
+  (x as Stop).kind === 'house' &&
   typeof (x as Stop).id === 'string' &&
   UUID.test((x as Stop).id);
 
@@ -67,16 +67,15 @@ export function saveStops(key: string, stops: readonly Stop[], storage: StorageG
 }
 
 /**
- * Drop stops that are no longer public (hidden, released, ended). A `null` set means that kind could not be loaded, so its
+ * Drop stops that are no longer public (hidden, released). A `null` set means houses could not be loaded, so the
  * stops are kept: only a successful load is authoritative.
  */
 export function pruneStops(
   stops: readonly Stop[],
-  live: { houses: ReadonlySet<string> | null; events: ReadonlySet<string> | null },
+  live: { houses: ReadonlySet<string> | null },
 ): { stops: Stop[]; dropped: number } {
   const kept = stops.filter((s) => {
-    const set = s.kind === 'house' ? live.houses : live.events;
-    return set === null || set.has(s.id);
+    return live.houses === null || live.houses.has(s.id);
   });
   return { stops: kept, dropped: stops.length - kept.length };
 }
@@ -107,7 +106,7 @@ export function moveStop<T>(stops: readonly T[], i: number, dir: -1 | 1): T[] {
   return out;
 }
 
-// ---- Share link: https://truckeelights.com/?route=house:<id>,event:<id>,… ----
+// ---- Share link: https://truckeelights.com/?route=house:<id>,house:<id>,… ----
 
 export function routeShareUrl(base: string | undefined, stops: readonly Stop[]): string {
   // ':' and ',' are legal in a query; keep them readable. Ids are UUIDs, so nothing else needs escaping.
@@ -116,7 +115,7 @@ export function routeShareUrl(base: string | undefined, stops: readonly Stop[]):
     .join(',')}`;
 }
 
-/** Parse `?route=` (already URL-decoded). Junk entries are skipped; null when there is no param at all. */
+/** Parse `?route=` (already URL-decoded). Junk entries (including any `event:` ones) are skipped; null when there is no param at all. */
 export function parseRouteParam(value: string | null | undefined): Stop[] | null {
   if (value == null) return null;
   return cleanStops(
