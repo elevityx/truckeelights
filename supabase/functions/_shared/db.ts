@@ -6,8 +6,11 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.1
 import { secretKey } from './http.ts';
 
 export type Cadence = 'daily' | 'weekly';
-export interface DigestHouse { id: string; address: string; town?: string | null }
-export interface DigestEvent { id: string; title: string; starts_at: string; venue?: string | null }
+export type Season = 'halloween' | 'christmas';
+/** A house in a digest row. `town` comes from `private.town_from_address` (null when unknown); `votes` 0 if none. */
+export interface DigestHouse { id: string; address: string; town?: string | null; votes?: number }
+/** An event in a digest row. `far`: outside the region's local box (`private.event_bounds`), "Worth the drive". */
+export interface DigestEvent { id: string; title: string; starts_at: string; venue?: string | null; town?: string | null; far?: boolean }
 
 /** One row of `svc_digest_batch(run_id, limit)`. The row is already claimed (`sending`) when it is returned. */
 export interface DigestRecipient {
@@ -25,6 +28,14 @@ export interface DigestRecipient {
   region_name: string;
   timezone: string;
   cadence: Cadence;
+  /**
+   * The season fixed on the `digest_sends` row when it was claimed (the region's active season then). A resumed row
+   * keeps it, whatever the admin switched since, so a re-render is identical.
+   */
+  season: Season;
+  season_year: number;
+  /** True when the subscriber's last SENT digest was another season (or none): the email gets the header band. */
+  season_opener: boolean;
   houses: DigestHouse[];
   house_total: number;
   events: DigestEvent[];
@@ -65,7 +76,7 @@ export interface DigestDb {
   batch(runId: string, limit: number): Promise<DigestRecipient[]>;
   /**
    * `svc_digest_mark(row run_id, user_id, ok, error_code)` after a DEFINITE outcome: ok -> sent (advances
-   * last_sent_through); else failed. Ambiguous outcomes are not marked (the row stays `sending` and is resumed).
+   * last_sent_through and last_digest_season/year to the row's season); else failed. Ambiguous outcomes are not marked (the row stays `sending` and is resumed).
    */
   mark(runId: string, userId: string, ok: boolean, errorCode: string | null): Promise<boolean>;
   /**

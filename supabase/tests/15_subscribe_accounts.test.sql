@@ -3,10 +3,11 @@
 -- subscriptions + quota + token versions, house links (anonymous only, confirmed email, expiry, reuse, limits),
 -- claim_my_submissions scope, claims and removal requests, owner hide vs admin hide (shared routine + photo job),
 -- the admin_release_house refactor, admin_clear_owner, masked emails only, column grants, the subscribe capability,
--- events.approved_at, and the svc_* routines (service_role only; digest idempotency and cap; unsubscribe; delete).
+-- events.approved_at, and the svc_* routines (service_role only; digest idempotency and cap; unsubscribe; delete),
+-- and Amendment 3's digest data (season + opener, town, votes, far; last_digest_* advanced only on sent).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(197);
+select plan(219);
 
 -- ---------------------------------------------------------------- fixtures (as postgres)
 delete from public.admins;
@@ -460,6 +461,18 @@ update public.subscriptions set last_sent_through = now() - interval '1 hour', c
 update public.houses set created_at = now() - interval '2 hours' where region_id = current_setting('t.r')::uuid;
 update public.houses set created_at = now() - interval '5 minutes' where id = current_setting('t.h8')::uuid;
 update public.events set approved_at = now() - interval '5 minutes' where id = current_setting('t.e1')::uuid;
+insert into public.house_vote_totals (house_id, region_id, votes) values (current_setting('t.h8')::uuid, current_setting('t.r')::uuid, 3);
+-- Amendment 3: private.town_from_address (pure; no geocoding)
+select is(private.town_from_address('123 Main St, Truckee, CA 96161'), 'Truckee', 'town: the component after the street');
+select is(private.town_from_address('Downtown Park, 10046 Church St, Truckee, CA 96161'), 'Truckee', 'town: a venue first, then the street, then the town');
+select is(private.town_from_address('Fixture Plaza, Subtown'), 'Subtown', 'town: no numbered street -> the component after the first');
+select is(private.town_from_address('27 Lantern Ridge Ln, O''Brien Flats, CA'), 'O''Brien Flats', 'town: letters, spaces and apostrophes');
+select ok(private.town_from_address('123 Main St') is null, 'town: "123 Main St" (no town) -> null');
+select ok(private.town_from_address('123 Main St, CA 96161') is null, 'town: a state + zip component -> null');
+select ok(private.town_from_address('123 Main St, CA') is null and private.town_from_address('123 Main St, USA') is null, 'town: a bare state code or country -> null');
+select ok(private.town_from_address('1 A St, <b>x</b>') is null and private.town_from_address('1 A St, T0wn') is null
+          and private.town_from_address('1 A St, ' || repeat('a', 41)) is null and private.town_from_address('1 A St, X') is null
+          and private.town_from_address(null) is null and private.town_from_address('') is null, 'town: junk, digits, >40 or 1 char, null, empty -> null');
 -- bob: weekly, nothing new for him on the daily run
 insert into public.subscriptions (user_id, region_id, houses, events, cadence)
 values ('f5000000-0000-4000-a000-000000000002', current_setting('t.r')::uuid, true, false, 'weekly');
@@ -480,6 +493,16 @@ select is((select string_agg((e ->> 'email') || '|' || (e ->> 'house_total') || 
 select is(current_setting('t.b')::json -> 0 ->> 'idempotency_key', current_setting('t.key1'),
   'C8: the key is per content window: digest:<public_id>:<last_sent_through ISO>/<window_to ISO>');
 select ok((current_setting('t.b')::json -> 0 ->> 'payload') is null, 'a new claim carries no stored payload (render fresh)');
+select is((select (e ->> 'season') || '|' || (e ->> 'season_year') || '|' || (e ->> 'season_opener') from json_array_elements(current_setting('t.b')::json) e),
+  'halloween|2026|true', 'Amendment 3: the batch returns the claimed season; never sent before -> season_opener');
+select is((select (e -> 'houses' -> 0 ->> 'town') || '|' || (e -> 'houses' -> 0 ->> 'votes') from json_array_elements(current_setting('t.b')::json) e),
+  'Subtown|3', 'Amendment 3: each house carries town and votes (house_vote_totals)');
+select is((select (e -> 'events' -> 0 ->> 'town') || '|' || (e -> 'events' -> 0 ->> 'far') from json_array_elements(current_setting('t.b')::json) e),
+  'Subtown|false', 'Amendment 3: each event carries town and far (inside the local box -> false)');
+select is((select season::text || '|' || season_year from private.digest_sends where run_id = current_setting('t.run')::uuid),
+  'halloween|2026', 'Amendment 3: the season is fixed on the digest_sends row at claim time');
+select ok((select last_digest_season is null and last_digest_year is null from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'),
+  'claiming does not touch last_digest_*');
 select is(current_setting('t.b')::json -> 0 ->> 'run_id', current_setting('t.run'), 'the row belongs to this run');
 select is((select d.idempotency_key || '|' || (d.window_from = s.last_sent_through)::text from private.digest_sends d
              join public.subscriptions s on s.user_id = d.user_id where d.run_id = current_setting('t.run')::uuid),
@@ -491,6 +514,12 @@ select is(public.svc_digest_mark(current_setting('t.run')::uuid, 'f5000000-0000-
 reset role;
 select ok((select last_sent_through = (select window_to from private.digest_runs where run_id = current_setting('t.run')::uuid)
              from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'sent advances last_sent_through to the run window');
+select is((select last_digest_season::text || '|' || last_digest_year from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'),
+  'halloween|2026', 'Amendment 3: sent advances last_digest_season/year to the row''s season');
+select matches(test_helpers.err($$update public.subscriptions set last_digest_year = null where user_id = 'f5000000-0000-4000-a000-000000000001'$$),
+  '^new row for relation "subscriptions" violates check constraint "subscriptions_last_digest_pair"', 'last_digest_season/year: both or neither');
+select matches(test_helpers.err($$update private.digest_sends set season_year = null where run_id = '$$ || current_setting('t.run') || $$'$$),
+  '^new row for relation "digest_sends" violates check constraint "digest_sends_season_pair"', 'digest_sends season/season_year: both or neither');
 update private.digest_sends set updated_at = now() - interval '1 hour';
 set local role service_role;
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run')::uuid, 100)), 0, 'rerun after sent: nothing is sent again');
@@ -507,13 +536,24 @@ select ok((select cap_hit from private.digest_runs where run_id = current_settin
 update public.app_settings set digest_daily_cap = 500;
 update private.digest_runs set window_to = now() where run_id = current_setting('t.run2')::uuid;
 select set_config('t.key2', test_helpers.digest_key('f5000000-0000-4000-a000-000000000001', current_setting('t.run2')::uuid), true);
+-- Amendment 3: move the event outside the local box (still inside the admin box) and drop h8's vote counter.
+update public.events set lat = 31.1 where id = current_setting('t.e1')::uuid;
+delete from public.house_vote_totals where house_id = current_setting('t.h8')::uuid;
 set local role service_role;
-select is((select string_agg(idempotency_key, ',') from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), current_setting('t.key2'),
+select set_config('t.b2', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run2')::uuid, 100) b), true);
+reset role;
+select is((select string_agg(e ->> 'idempotency_key', ',') from json_array_elements(current_setting('t.b2')::json) e), current_setting('t.key2'),
   'below the cap again -> handed out with the window key');
+select is((select (e ->> 'season_opener') || '|' || (e -> 'events' -> 0 ->> 'far') || '|' || (e -> 'houses' -> 0 ->> 'votes')
+             from json_array_elements(current_setting('t.b2')::json) e),
+  'false|true|0', 'Amendment 3: same season as the last sent -> not an opener; outside the local box -> far; no vote row -> 0 votes');
+set local role service_role;
 select is(public.svc_digest_mark(current_setting('t.run2')::uuid, 'f5000000-0000-4000-a000-000000000001', false, 'Provider said: <bad>'), true, 'svc_digest_mark failure');
 reset role;
 select is((select status || '|' || error_code from private.digest_sends where run_id = current_setting('t.run2')::uuid), 'failed|error', 'failed row keeps only a sanitized code');
 select ok((select last_sent_through < now() - interval '30 minutes' from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'failure does not advance last_sent_through');
+-- Amendment 3: pretend alice's last sent digest was an older season, so a failure must leave that alone.
+update public.subscriptions set last_digest_season = 'christmas', last_digest_year = 2025 where user_id = 'f5000000-0000-4000-a000-000000000001';
 set local role service_role;
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run2')::uuid, 100)), 0, 'a failed row is retried on the next run, not this one');
 reset role;
@@ -555,8 +595,8 @@ select is((select count(*)::int from public.svc_digest_batch(current_setting('t.
 reset role;
 -- ... after 5 minutes the next cron tick resumes it with the same key.
 update private.digest_sends set updated_at = now() - interval '6 minutes' where run_id = current_setting('t.run3')::uuid;
-set local role service_role;
--- State changes between the accepted send and the resume: alice drops events and her link version moves.
+-- State changes between the accepted send and the resume: alice drops events and her link version moves (as the
+-- owner role: service_role has no table grants, it reaches subscriptions only through the svc_* routines).
 update public.subscriptions set events = false, token_version = token_version + 1 where user_id = 'f5000000-0000-4000-a000-000000000001';
 set local role service_role;
 select set_config('t.b3', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run3')::uuid, 100) b), true);
@@ -576,6 +616,8 @@ set local role service_role;
 select set_config('t.run4', public.svc_digest_start('daily', '2026-10-23')::text, true);
 reset role;
 update private.digest_runs set window_to = now() + interval '1 minute' where run_id = current_setting('t.run4')::uuid;
+-- Amendment 3: the admin switches the region to Christmas before the resume; the row keeps its claimed season.
+update public.site_settings set active_season = 'christmas' where region_id = current_setting('t.r')::uuid;
 set local role service_role;
 select set_config('t.b4', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run4')::uuid, 100) b), true);
 reset role;
@@ -585,6 +627,9 @@ select is((select string_agg((e ->> 'run_id') || '|' || (e ->> 'idempotency_key'
   current_setting('t.run3') || '|' || current_setting('t.key3') || '|true|<p>A+B</p>',
   'C8: a later run resumes the unresolved row with ITS run id, key, window and payload, even with the cap full');
 select ok(not (select cap_hit from private.digest_runs where run_id = current_setting('t.run4')::uuid), 'a resume alone does not hit the cap');
+select is((select (e ->> 'season') || '|' || (e ->> 'season_year') || '|' || (e ->> 'season_opener') from json_array_elements(current_setting('t.b4')::json) e),
+  'halloween|2026|true', 'Amendment 3: a resumed row keeps its claimed season after a season switch (opener vs the older last season)');
+update public.site_settings set active_season = 'halloween' where region_id = current_setting('t.r')::uuid;
 update public.app_settings set digest_daily_cap = 500;
 select is((select count(*)::int from private.digest_sends where run_id = current_setting('t.run4')::uuid), 0, 'no new row (no new key) while a send is unresolved');
 set local role service_role;
@@ -592,6 +637,8 @@ select is(public.svc_digest_mark(current_setting('t.run3')::uuid, 'f5000000-0000
 reset role;
 select ok((select last_sent_through = now() + interval '1 second' from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), 'last_sent_through advances to the resumed row''s window');
 select ok((select payload is null from private.digest_sends where run_id = current_setting('t.run3')::uuid), 'the stored payload is cleared once the row is sent');
+select is((select last_digest_season::text || '|' || last_digest_year from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'),
+  'halloween|2026', 'Amendment 3: the resumed row''s claimed season is what last_digest_* advances to');
 update public.subscriptions set events = true where user_id = 'f5000000-0000-4000-a000-000000000001';
 -- A fresh unresolved send blocks any new key; a stale one whose window no longer has content is closed (no_content).
 update public.subscriptions set last_sent_through = now() - interval '1 hour' where user_id = 'f5000000-0000-4000-a000-000000000001';
@@ -624,10 +671,20 @@ set local role service_role;
 select is((select count(*)::int from public.svc_digest_batch(current_setting('t.run7')::uuid, 100)), 0, 'weekly run: the daily sends already used the shared cap');
 reset role;
 update public.app_settings set digest_daily_cap = current_setting('t.used')::smallint + 1;
+-- Amendment 3: bob's last sent digest is a NEWER season than this row's (halloween 2026).
+update public.subscriptions set last_digest_season = 'christmas', last_digest_year = 2026 where user_id = 'f5000000-0000-4000-a000-000000000002';
 set local role service_role;
-select is((select string_agg(user_id::text, ',') from public.svc_digest_batch(current_setting('t.run7')::uuid, 100)), 'f5000000-0000-4000-a000-000000000002',
-  'weekly run: one more unit of cap -> bob (weekly) is handed out');
+select set_config('t.b7', (select coalesce(json_agg(b), '[]'::json)::text from public.svc_digest_batch(current_setting('t.run7')::uuid, 100) b), true);
 reset role;
+select is((select string_agg(e ->> 'user_id', ',') from json_array_elements(current_setting('t.b7')::json) e), 'f5000000-0000-4000-a000-000000000002',
+  'weekly run: one more unit of cap -> bob (weekly) is handed out');
+select is((select (e ->> 'season') || '|' || (e ->> 'season_opener') from json_array_elements(current_setting('t.b7')::json) e), 'halloween|true',
+  'Amendment 3: a different last season -> season_opener');
+set local role service_role;
+select is(public.svc_digest_mark(current_setting('t.run7')::uuid, 'f5000000-0000-4000-a000-000000000002', true, null), true, 'bob''s weekly row is sent');
+reset role;
+select is((select last_digest_season::text || '|' || last_digest_year from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000002'),
+  'christmas|2026', 'Amendment 3: last_digest_* never moves backwards to an older season');
 update public.app_settings set digest_daily_cap = 500;
 -- unsubscribe
 select set_config('t.pub', (select public_id::text from public.subscriptions where user_id = 'f5000000-0000-4000-a000-000000000001'), true);

@@ -66,10 +66,15 @@ create table public.subscriptions (
   confirmed_at timestamptz not null default now(),
   stopped_at timestamptz,
   last_sent_through timestamptz not null default now(),                           -- advances only on 'sent'
+  -- Amendment 3: the season of the last digest actually sent (svc_digest_mark on 'sent'). A digest for another
+  -- season (or the first one ever) is a season opener and gets the seasonal header band.
+  last_digest_season public.season_kind,
+  last_digest_year integer check (last_digest_year is null or last_digest_year between 2024 and 2100),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (houses or events),
-  check ((status = 'stopped') = (stopped_at is not null))
+  check ((status = 'stopped') = (stopped_at is not null)),
+  constraint subscriptions_last_digest_pair check ((last_digest_season is null) = (last_digest_year is null))
 );
 create index subscriptions_digest_idx on public.subscriptions (status, cadence, last_sent_through);
 create index subscriptions_region_idx on public.subscriptions (region_id, status);
@@ -143,10 +148,15 @@ create table private.digest_sends (
   window_from timestamptz not null,
   window_to timestamptz not null,
   payload jsonb check (payload is null or (jsonb_typeof(payload) = 'object' and octet_length(payload::text) <= 262144)),
+  -- Amendment 3: the region's active season when the row was claimed. Fixed for the row's life, so a resumed row
+  -- renders the same season (header, brand, content) whatever the admin switched since.
+  season public.season_kind,
+  season_year integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   sent_at timestamptz,
-  primary key (run_id, user_id)
+  primary key (run_id, user_id),
+  constraint digest_sends_season_pair check ((season is null) = (season_year is null))
 );
 create index digest_sends_day_idx on private.digest_sends (status, updated_at);
 create index digest_sends_user_idx on private.digest_sends (user_id, status);
@@ -183,6 +193,25 @@ create function private.mask_email(p text) returns text
 language sql immutable set search_path = '' as $$
   select case when p is null or position('@' in p) < 2 then null
               else left(lower(split_part(p, '@', 1)), 1) || '•••@' || lower(split_part(p, '@', 2)) end
+$$;
+
+-- Amendment 3: the town of an address, for the digest only. The component right after the street (the first
+-- component that starts with a digit, else the first one), when it is a word-only token: letters, spaces and
+-- apostrophes, 2-40 chars, not a bare state code. Anything else is null and the email just omits the town.
+-- "123 Main St, Truckee, CA 96161" -> Truckee; "Downtown Park, 10046 Church St, Truckee, CA" -> Truckee;
+-- "123 Main St" -> null. No geocoding.
+create function private.town_from_address(p text) returns text
+language sql immutable set search_path = '' as $$
+  with parts as (
+    select btrim(x.part) as part, x.n from unnest(string_to_array(coalesce(p, ''), ',')) with ordinality as x(part, n)
+  ), street as (
+    select coalesce((select min(n) from parts where part ~ '^[0-9]'), 1) as n
+  )
+  select t.part from parts t, street s
+   where t.n = s.n + 1
+     and t.part ~ '^[A-Za-z][A-Za-z ''’]{0,38}[A-Za-z]$'
+     and t.part !~ '\s\s'
+     and t.part !~ '^[A-Z]{2}$' and upper(t.part) <> 'USA'
 $$;
 
 create function private.email_hash(p text) returns bytea
@@ -792,10 +821,14 @@ end $$;
 --    never needs room (it was charged when claimed), so rows stuck `sending` are drained even when they are what
 --    filled the cap. Only new claims are limited, and one advisory lock per UTC day serializes the
 --    read-count-claim across daily and weekly batches.
+--  * Amendment 3 (digest design B): each row also carries its season (fixed on the digest_sends row at claim time; a
+--    resume keeps it and its content is read for that season), season_opener (the subscriber's last SENT season
+--    differs, or none yet), per house town + votes, per event town + far (outside the local box).
 create function public.svc_digest_batch(p_run_id uuid, p_limit integer)
 returns table (run_id uuid, user_id uuid, email text, idempotency_key text, window_to timestamptz,
                public_id uuid, token_version integer,
                region_slug text, region_name text, timezone text, cadence text,
+               season text, season_year integer, season_opener boolean,
                houses jsonb, house_total integer, events jsonb, event_total integer, payload jsonb)
 language plpgsql security definer set search_path = '' as $$
 #variable_conflict use_column
@@ -816,32 +849,46 @@ begin
            coalesce(s.last_sent_through, s.confirmed_at) as w_from,
            p.run_id as p_run, p.idempotency_key as p_key, p.payload as p_payload,
            coalesce(p.window_to, v_run.window_to) as w_to,
+           sea.season as sea_season, sea.year as sea_year,
+           (s.last_digest_season is distinct from sea.season or s.last_digest_year is distinct from sea.year) as opener,
            hs.items as h_items, hs.total as h_total, ev.items as e_items, ev.total as e_total
       from public.subscriptions s
       join auth.users u on u.id = s.user_id
       join public.regions r on r.id = s.region_id
       join public.site_settings ss on ss.region_id = s.region_id
       left join lateral (
-        select d.run_id, d.idempotency_key, d.window_to, d.updated_at, d.payload from private.digest_sends d
+        select d.run_id, d.idempotency_key, d.window_to, d.updated_at, d.payload, d.season, d.season_year
+          from private.digest_sends d
          where d.user_id = s.user_id and d.status = 'sending'
          order by d.created_at limit 1
       ) p on true
+      -- Amendment 3: a resumed row keeps the season it was claimed in; a new claim takes the region's active one.
       cross join lateral (
-        select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'address', x.address) order by x.created_at desc, x.id)
+        select coalesce(p.season, ss.active_season) as season, coalesce(p.season_year, ss.active_year::integer) as year
+      ) sea
+      cross join lateral (
+        select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'address', x.address,
+                                                     'town', private.town_from_address(x.address), 'votes', x.votes)
+                                  order by x.created_at desc, x.id)
                         filter (where x.rn <= 10), '[]'::jsonb) as items, count(*)::integer as total
-          from (select h.id, h.address, h.created_at, row_number() over (order by h.created_at desc, h.id) as rn
+          from (select h.id, h.address, h.created_at, coalesce(vt.votes, 0) as votes,
+                       row_number() over (order by h.created_at desc, h.id) as rn
                   from public.houses h
-                 where s.houses and h.region_id = s.region_id and h.season = ss.active_season and h.year = ss.active_year
+                  left join public.house_vote_totals vt on vt.house_id = h.id
+                 where s.houses and h.region_id = s.region_id and h.season = sea.season and h.year = sea.year
                    and h.status = 'visible' and h.created_at > s.last_sent_through
                    and h.created_at <= coalesce(p.window_to, v_run.window_to)) x
       ) hs
       cross join lateral (
-        select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'starts_at', x.starts_at, 'venue', x.venue)
+        select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'starts_at', x.starts_at, 'venue', x.venue,
+                                                     'town', private.town_from_address(x.address), 'far', x.far)
                                   order by x.starts_at, x.id) filter (where x.rn <= 10), '[]'::jsonb) as items,
                count(*)::integer as total
-          from (select e.id, e.title, e.starts_at, e.venue, row_number() over (order by e.starts_at, e.id) as rn
+          from (select e.id, e.title, e.starts_at, e.venue, e.address,
+                       not private.in_event_bounds(s.region_id, e.lat, e.lng) as far,
+                       row_number() over (order by e.starts_at, e.id) as rn
                   from public.events e
-                 where s.events and e.region_id = s.region_id and e.season = ss.active_season and e.year = ss.active_year
+                 where s.events and e.region_id = s.region_id and e.season = sea.season and e.year = sea.year
                    and e.status = 'approved' and e.approved_at > s.last_sent_through
                    and e.approved_at <= coalesce(p.window_to, v_run.window_to)
                    -- "still upcoming" is judged at the window's end, not now()
@@ -878,8 +925,8 @@ begin
       v_key := 'digest:' || c.public_id::text || ':'
                || to_char(c.w_from at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '/'
                || to_char(v_run.window_to at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
-      insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to)
-      values (p_run_id, c.user_id, 'sending', v_key, c.w_from, v_run.window_to);
+      insert into private.digest_sends (run_id, user_id, status, idempotency_key, window_from, window_to, season, season_year)
+      values (p_run_id, c.user_id, 'sending', v_key, c.w_from, v_run.window_to, c.sea_season, c.sea_year);
       run_id := p_run_id; idempotency_key := v_key; payload := null;
       v_new := v_new + 1;
     end if;
@@ -887,6 +934,7 @@ begin
     user_id := c.user_id; email := c.email; window_to := c.w_to;
     public_id := c.public_id; token_version := c.token_version; region_slug := c.slug; region_name := c.name;
     timezone := c.timezone; cadence := c.cadence; houses := c.h_items; house_total := c.h_total;
+    season := c.sea_season::text; season_year := c.sea_year; season_opener := c.opener;
     events := c.e_items; event_total := c.e_total;
     return next;
   end loop;
@@ -925,7 +973,7 @@ end $$;
 -- row's run (svc_digest_batch returns it; a resumed row can belong to an earlier run).
 create function public.svc_digest_mark(p_run_id uuid, p_user_id uuid, p_ok boolean, p_error_code text) returns boolean
 language plpgsql security definer set search_path = '' as $$
-declare v_to timestamptz;
+declare v_to timestamptz; v_season public.season_kind; v_year integer;
   v_code text := case when coalesce(p_error_code, '') ~ '^[a-z0-9_]{1,40}$' then p_error_code else 'error' end;
 begin
   if p_ok is null then raise exception 'invalid_input' using errcode = '22023', detail = 'ok'; end if;
@@ -936,10 +984,20 @@ begin
          payload = null,
          updated_at = now()
    where run_id = p_run_id and user_id = p_user_id and status = 'sending'
-  returning window_to into v_to;
+  returning window_to, season, season_year into v_to, v_season, v_year;
   if not found then return false; end if;
   if p_ok then
-    update public.subscriptions set last_sent_through = greatest(last_sent_through, v_to) where user_id = p_user_id;
+    -- Amendment 3: the sent row's season becomes the last one this subscriber got, never moving backwards (a late
+    -- resume of an older season's row does not undo a newer one). Both columns move together.
+    update public.subscriptions s
+       set last_sent_through = greatest(s.last_sent_through, v_to),
+           last_digest_season = case when v_season is not null and (s.last_digest_year is null
+                                       or (v_year, v_season) >= (s.last_digest_year, s.last_digest_season))
+                                     then v_season else s.last_digest_season end,
+           last_digest_year   = case when v_season is not null and (s.last_digest_year is null
+                                       or (v_year, v_season) >= (s.last_digest_year, s.last_digest_season))
+                                     then v_year else s.last_digest_year end
+     where s.user_id = p_user_id;
     update private.digest_runs set sent = sent + 1 where run_id = p_run_id;
   else
     update private.digest_runs set failed = failed + 1 where run_id = p_run_id;

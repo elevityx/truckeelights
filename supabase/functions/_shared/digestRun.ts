@@ -7,7 +7,8 @@
 //                         provider call; a row with one is sent from it verbatim (never re-rendered), so a resumed
 //                         send repeats the identical request under the same key and Resend dedupes it
 //   (Resend, with Idempotency-Key = the row's stored key)
-//   svc_digest_mark    -> a DEFINITE outcome only: 2xx -> `sent`, advancing last_sent_through; 4xx -> `failed`
+//   svc_digest_mark    -> a DEFINITE outcome only: 2xx -> `sent`, advancing last_sent_through (and the last
+//                         digest season); 4xx -> `failed`
 //                         (the window is not advanced, so the next run picks the items up again under a new key). An ambiguous outcome
 //                         (timeout, network error, 5xx) is left `sending` and resumed later with the same key.
 //   svc_digest_finish  -> totals and cap_hit
@@ -73,6 +74,11 @@ export async function buildEmail(r: DigestRecipient, cfg: RunConfig): Promise<Ou
     prefsUrl: `${cfg.siteUrl}/unsubscribe/?t=${encodeURIComponent(prefsToken)}`,
     cadence: r.cadence,
     timezone: r.timezone,
+    season: r.season,
+    seasonYear: r.season_year,
+    seasonOpener: r.season_opener === true,
+    windowTo: r.window_to,
+    regionName: r.region_name,
   });
   if (!rendered) return null;
   return {

@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- Source for the digest email wordmarks (public/email/*.png), drawn from the approved mockup (Direction B badge,
+     Direction A header band). Rendered by scripts/email/render.mjs; open it in a browser to preview. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Email wordmarks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=Fraunces:opsz,wght@9..144,700&display=block">
+<style>
+  body { margin: 0; padding: 16px; background: #ddd; font: 14px system-ui, sans-serif; }
+  img { display: block; margin: 0 0 16px; max-width: 100%; }
+  /* force the fonts to load before the canvases draw */
+  .warm { position: absolute; left: -9999px; }
+  .warm span:first-child { font-family: Creepster; } .warm span:last-child { font-family: Fraunces; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="warm" aria-hidden="true"><span>Truckee Frights</span><span>Truckee Lights</span></div>
+<div id="out"></div>
+<script>
+const SYS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const T = {
+  halloween: { brand: 'Truckee Frights', night: '#140A1F', a1: '#8AE234', cream: '#F3ECDA' },
+  christmas: { brand: 'Truckee Lights', night: '#123B2C', a1: '#F2C14E', cream: '#F7F1DE' },
+};
+function rnd(seed) { let x = 0; for (let i = 0; i < seed.length; i++) x = (x * 31 + seed.charCodeAt(i)) >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; }
+function drawBg(c, season, w, h) {
+  const g = c.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, season === 'halloween' ? '#241040' : '#174a37'); g.addColorStop(1, T[season].night);
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+}
+function bat(c, x, y, s) {
+  c.save(); c.translate(x, y); c.scale(s, s); c.beginPath(); c.moveTo(0, 0);
+  c.quadraticCurveTo(-10, -10, -22, -4); c.quadraticCurveTo(-16, -2, -14, 4); c.quadraticCurveTo(-8, 0, -4, 6); c.lineTo(0, 2);
+  c.lineTo(4, 6); c.quadraticCurveTo(8, 0, 14, 4); c.quadraticCurveTo(16, -2, 22, -4); c.quadraticCurveTo(10, -10, 0, 0); c.fill(); c.restore();
+}
+function lights(c, w, y0, sag, n, r) {
+  const cols = ['#ff4d4d', '#f2c14e', '#5fd38d', '#ffffff'];
+  c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 2; c.beginPath(); c.moveTo(0, y0); c.quadraticCurveTo(w / 2, y0 + sag * 2, w, y0); c.stroke();
+  for (let i = 1; i < n; i++) {
+    const f = i / n, x = f * w, y = (1 - f) * (1 - f) * y0 + 2 * (1 - f) * f * (y0 + sag * 2) + f * f * y0;
+    c.save(); c.shadowColor = cols[i % 4]; c.shadowBlur = r * 3; c.fillStyle = cols[i % 4]; c.beginPath(); c.ellipse(x, y + r * 1.2, r * .75, r * 1.15, 0, 0, 7); c.fill(); c.restore();
+  }
+}
+function drawWord(c, season, text, x, y, px) {
+  c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  c.font = season === 'halloween' ? `${px}px Creepster, Impact, sans-serif` : `700 ${px}px Fraunces, Georgia, serif`;
+  c.save();
+  if (season === 'halloween') { c.shadowColor = 'rgba(255,122,26,.75)'; c.shadowBlur = px * .25; c.fillStyle = T[season].a1; }
+  else { c.shadowColor = 'rgba(242,193,78,.55)'; c.shadowBlur = px * .2; c.fillStyle = T[season].cream; }
+  c.fillText(text, x, y); c.restore();
+}
+function canvas(w, h) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; return cv; }
+function rounded(c, w, h, r) { c.beginPath(); c.moveTo(r, 0); c.arcTo(w, 0, w, h, r); c.arcTo(w, h, 0, h, r); c.arcTo(0, h, 0, 0, r); c.arcTo(0, 0, w, 0, r); c.closePath(); }
+
+// Returns { 'halloween-band': dataURL, ... }. band: 1200x300 (shown 600x150). badge: 440x104 (shown 150x35).
+window.renderWordmarks = async function () {
+  await document.fonts.load('60px Creepster'); await document.fonts.load('700 60px Fraunces'); await document.fonts.ready;
+  const out = {};
+  for (const s of ['halloween', 'christmas']) {
+    const t = T[s];
+    let cv = canvas(1200, 300), c = cv.getContext('2d'); drawBg(c, s, 1200, 300);
+    if (s === 'halloween') {
+      c.fillStyle = 'rgba(243,236,218,.92)'; c.beginPath(); c.arc(1040, 86, 46, 0, 7); c.fill();
+      c.fillStyle = '#0b0612'; bat(c, 180, 70, 1.6); bat(c, 260, 46, 1.1); bat(c, 960, 150, 1.2);
+      c.fillStyle = '#0b0612'; c.beginPath(); c.moveTo(0, 300); c.lineTo(0, 262); c.quadraticCurveTo(300, 226, 600, 256); c.quadraticCurveTo(900, 284, 1200, 248); c.lineTo(1200, 300); c.fill();
+      for (let i = 0; i < 7; i++) { c.save(); c.shadowColor = '#ff7a1a'; c.shadowBlur = 14; c.fillStyle = '#ff7a1a'; c.beginPath(); c.ellipse(90 + i * 170, 276, 11, 9, 0, 0, 7); c.fill(); c.restore(); }
+    } else {
+      lights(c, 1200, 8, 26, 22, 9);
+      c.fillStyle = 'rgba(255,255,255,.65)'; const r = rnd('snow'); for (let k = 0; k < 70; k++) { c.beginPath(); c.arc(r() * 1200, 60 + r() * 230, 1 + r() * 2.2, 0, 7); c.fill(); }
+      c.fillStyle = '#0d2e22'; for (let j = 0; j < 9; j++) { const tx = j * 150 - 20, th = 60 + (j % 3) * 22; c.beginPath(); c.moveTo(tx, 300); c.lineTo(tx + 38, 300 - th); c.lineTo(tx + 76, 300); c.fill(); }
+    }
+    drawWord(c, s, t.brand, 600, s === 'halloween' ? 178 : 186, s === 'halloween' ? 132 : 112);
+    c.font = `700 22px ${SYS}`; c.fillStyle = s === 'halloween' ? '#B8A9CF' : '#F2C14E'; c.textAlign = 'center';
+    try { c.letterSpacing = '4px'; } catch { /* older canvas */ }
+    c.fillText('NEW HOUSES  ·  EVENTS  ·  TRUCKEE & NORTH TAHOE', 600, 236);
+    try { c.letterSpacing = '0px'; } catch { /* older canvas */ }
+    out[`${s}-band`] = cv.toDataURL('image/png');
+
+    cv = canvas(440, 104); c = cv.getContext('2d'); c.fillStyle = t.night; rounded(c, 440, 104, 18); c.fill();
+    c.save(); rounded(c, 440, 104, 18); c.clip();
+    if (s === 'christmas') lights(c, 440, 2, 10, 9, 5);
+    drawWord(c, s, t.brand, 220, s === 'halloween' ? 74 : 72, s === 'halloween' ? 58 : 50);
+    c.restore();
+    out[`${s}-badge`] = cv.toDataURL('image/png');
+  }
+  return out;
+};
+window.renderWordmarks().then((imgs) => {
+  const el = document.getElementById('out');
+  for (const [k, v] of Object.entries(imgs)) { const p = document.createElement('p'); p.textContent = k; const i = new Image(); i.src = v; i.alt = k; el.append(p, i); }
+});
+</script>
+</body>
+</html>

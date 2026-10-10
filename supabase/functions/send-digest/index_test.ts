@@ -29,6 +29,7 @@ type Row = Omit<DigestRecipient, 'idempotency_key' | 'run_id' | 'window_to' | 'p
 const recipient = (n: number, withContent = true): Row => ({
   user_id: uid(n), email: `person${n}@example.test`, public_id: uid(1000 + n), token_version: 2,
   region_slug: 'truckee', region_name: 'Truckee', timezone: 'America/Los_Angeles', cadence: 'daily',
+  season: 'christmas', season_year: 2026, season_opener: false,
   houses: withContent ? [{ id: uid(5000 + n), address: `${n} Pine St` }] : [], house_total: withContent ? 1 : 0,
   events: [], event_total: 0, window_from: WINDOW_FROM,
 });
