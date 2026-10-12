@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LAYER_KEY, layerUrl, readLayer, saveLayer } from './layer';
+import { HOUSE_HINT_KEY, LAYER_KEY, layerUrl, readHouseHint, readLayer, saveHouseHintSeen, saveLayer } from './layer';
 
 function memory() {
   const m = new Map<string, string>();
@@ -15,9 +15,9 @@ const throwing = {
 };
 
 describe('layer switch state', () => {
-  it('defaults to houses', () => {
-    expect(readLayer('', () => memory())).toBe('houses');
-    expect(readLayer('', () => null)).toBe('houses');
+  it('defaults to events', () => {
+    expect(readLayer('', () => memory())).toBe('events');
+    expect(readLayer('', () => null)).toBe('events');
   });
   it('remembers the choice', () => {
     const s = memory();
@@ -31,10 +31,10 @@ describe('layer switch state', () => {
     expect(readLayer('?layer=events', () => s)).toBe('events');
     expect(readLayer('?layer=nope', () => s)).toBe('both');
     s.m.set(LAYER_KEY, 'garbage');
-    expect(readLayer('', () => s)).toBe('houses');
+    expect(readLayer('', () => s)).toBe('events');
   });
   it('survives a throwing localStorage', () => {
-    expect(readLayer('', () => throwing)).toBe('houses');
+    expect(readLayer('', () => throwing)).toBe('events');
     expect(readLayer('?layer=both', () => throwing)).toBe('both');
     expect(() => saveLayer('events', () => throwing)).not.toThrow();
   });
@@ -42,11 +42,20 @@ describe('layer switch state', () => {
     const boom = () => {
       throw new DOMException('denied', 'SecurityError');
     };
-    expect(readLayer('', boom)).toBe('houses');
+    expect(readLayer('', boom)).toBe('events');
     expect(() => saveLayer('events', boom)).not.toThrow();
   });
   it('writes the layer into the URL, keeping other params', () => {
-    expect(layerUrl('https://x.test/?view=list', 'events')).toBe('/?view=list&layer=events');
-    expect(layerUrl('https://x.test/?layer=both&event=abc', 'houses')).toBe('/?event=abc');
+    expect(layerUrl('https://x.test/?view=list', 'houses')).toBe('/?view=list&layer=houses');
+    expect(layerUrl('https://x.test/?layer=both&event=abc', 'events')).toBe('/?event=abc');
+  });
+  it('shows the Houses hint until the switch is used', () => {
+    const s = memory();
+    expect(readHouseHint(() => s)).toBe(true);
+    saveHouseHintSeen(() => s);
+    expect(s.m.get(HOUSE_HINT_KEY)).toBe('1');
+    expect(readHouseHint(() => s)).toBe(false);
+    expect(readHouseHint(() => throwing)).toBe(true);
+    expect(() => saveHouseHintSeen(() => throwing)).not.toThrow();
   });
 });

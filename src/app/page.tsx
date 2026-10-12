@@ -7,7 +7,7 @@ import AddEventSheet from '@/components/events/AddEventSheet';
 import { devEventsFixture, eventsApi } from '@/components/events/api';
 import EventSheet from '@/components/events/EventSheet';
 import { EventsView, UpcomingEvents } from '@/components/events/EventsList';
-import { layerUrl, readLayer, saveLayer, showsEvents, showsHouses, type Layer } from '@/components/events/layer';
+import { DEFAULT_LAYER, layerUrl, readHouseHint, readLayer, saveHouseHintSeen, saveLayer, showsEvents, showsHouses, type Layer } from '@/components/events/layer';
 import LayerSwitch from '@/components/events/LayerSwitch';
 import AddPhotosSheet from '@/components/photos/AddPhotosSheet';
 import HouseSheet from '@/components/house/HouseSheet';
@@ -54,7 +54,8 @@ export default function HomePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'house' | 'add' | 'photos' | 'event' | 'chooser' | 'addEvent' | 'subscribe' | 'nudgePreview' | 'route' | null>(null);
   const [subAccount, setSubAccount] = useState<boolean | undefined>(undefined); // Subscribe opened from the post-add nudge
-  const [layer, setLayer] = useState<Layer>('houses');
+  const [layer, setLayer] = useState<Layer>(DEFAULT_LAYER);
+  const [houseHint, setHouseHint] = useState(false); // pulse the Houses button until the switch is used
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const eventsNow = useClock(); // advances ~every minute and on visibilitychange: grouping and expiry stay current
   const [eventId, setEventId] = useState<string | null>(null);
@@ -128,6 +129,7 @@ export default function HomePage() {
         if (q.get('view') === 'list') setView('list');
         const startLayer = c.events ? readLayer(window.location.search, localStore) : 'houses';
         setLayer(startLayer);
+        setHouseHint(!!c.events && readHouseHint(localStore));
         if (evError) showToast("Couldn't load events. Houses are still here.");
         // Build my route: restore the saved stops (dropping any no longer public) and read a shared ?route= link.
         const openRoute = routeInit(c.season, c.year, p, window.location.search);
@@ -150,11 +152,13 @@ export default function HomePage() {
           if (p.some((x) => x.id === h)) {
             setSelectedId(h);
             setSheet('house');
+            if (startLayer === 'events') setLayer('both'); // show the pin too; not saved as a preference
           } else {
             showToast("That house isn't on this season's map.");
           }
         } else if (openRoute) {
           setSheet('route');
+          if (startLayer === 'events') setLayer('both'); // routes are houses; not saved as a preference
         }
       } catch (e) {
         if (!cancelled) setError(toDataError(e));
@@ -195,6 +199,8 @@ export default function HomePage() {
 
   const changeLayer = useCallback((l: Layer) => {
     setLayer(l);
+    setHouseHint(false);
+    saveHouseHintSeen(localStore);
     if (l === 'events') setFitEventsSeq((n) => n + 1); // Houses and Both keep the camera
     saveLayer(l, localStore);
     history.replaceState(null, '', layerUrl(window.location.href, l));
@@ -204,6 +210,7 @@ export default function HomePage() {
     if (!ctx) return;
     try {
       setPins(await listMapHouses(ctx.region.id));
+      setLayer((l) => (l === 'events' ? 'both' : l)); // the new house must be visible; not saved
       select(thenSelect);
       then?.();
     } catch (e) {
@@ -261,7 +268,7 @@ export default function HomePage() {
     );
   }
 
-  const inlineSwitch = ctx.events && <LayerSwitch variant="inline" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />;
+  const inlineSwitch = ctx.events && <LayerSwitch variant="inline" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} hint={houseHint && layer === 'events'} />;
   return (
     <>
       <Header
@@ -272,12 +279,12 @@ export default function HomePage() {
         }}
         addChooser={ctx.events ? { eventsOpen: ctx.events.open } : undefined}
         menu={subOpen ? <HeaderMenu onSubscribe={() => openSubscribe()} /> : undefined}
-        layerSwitch={ctx.events && <LayerSwitch variant="bar" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />}
+        layerSwitch={ctx.events && <LayerSwitch variant="bar" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} hint={houseHint && layer === 'events'} />}
       />
       <div className="pbody">
         <div className={route.count > 0 ? 'views has-route' : 'views'}>
           {ctx.events && view === 'map' && (
-            <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} />
+            <LayerSwitch variant="float" layer={layer} onChange={changeLayer} houses={pins.length} events={liveEvents.length} hint={houseHint && layer === 'events'} />
           )}
           {view === 'map' ? (
             <MapView

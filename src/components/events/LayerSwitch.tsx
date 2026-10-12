@@ -11,6 +11,8 @@ interface Props {
    * 'inline' is the same pill in the list's control row (below 1024px), next to the sort button.
    */
   variant: 'bar' | 'float' | 'inline';
+  /** Pulse the Houses button to invite a first tap. */
+  hint?: boolean;
 }
 
 const OPTIONS: [Layer, string][] = [
@@ -20,13 +22,13 @@ const OPTIONS: [Layer, string][] = [
 ];
 
 /** Houses · Events · Both. One state drives the map and the list. */
-export default function LayerSwitch({ layer, onChange, houses, events, variant }: Props) {
+export default function LayerSwitch({ layer, onChange, houses, events, variant, hint }: Props) {
   return (
     <div className={variant === 'bar' ? 'seg layerseg' : variant === 'inline' ? 'layerfloat layerinline' : 'layerfloat'} role="group" aria-label="Show on the map and list">
       {OPTIONS.map(([value, label]) => {
         const n = value === 'houses' ? houses : value === 'events' ? events : null;
         return (
-          <button key={value} type="button" aria-pressed={layer === value} onClick={() => onChange(value)}>
+          <button key={value} type="button" className={hint && value === 'houses' ? 'hint' : undefined} aria-pressed={layer === value} onClick={() => onChange(value)}>
             {label}
             {n !== null && (
               <span className="n">
