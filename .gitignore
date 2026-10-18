@@ -48,3 +48,10 @@ supabase/.temp/
 supabase/.branches/
 next-env.d.ts
 *.tsbuildinfo
+# L1 parity harness (e2e/)
+out-lights/
+out-vibes/
+e2e/.cache/
+e2e-artifacts/
+test-results/
+playwright-report/

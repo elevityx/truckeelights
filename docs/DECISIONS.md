@@ -29,3 +29,14 @@ Technical decisions, what was considered, and why. Entries keep their original n
 | D25 | Hidden-row duplicates | A duplicate of a hidden house returns a `blocked` result without leaking the row, and an admin can release the house to free its keys. | A partial unique index on visible rows: unhiding could create two visible pins. Returning the hidden id: tells the visitor "already on the map" when nothing shows. |
 | D26 | Revocation | Delete or rotate the stored object, driven by a database queue that is sent right after commit and retried on a schedule, with an admin fallback that works if the runner is down. | Relying on signed-URL expiry: the client chooses the lifetime. Deleting from the admin's browser only after the RPC: a closed tab leaves the object live. An RPC that returns signed URLs: not possible from SQL without a server, and it wouldn't stop direct signing. |
 | D29 | Public photo reads | A small Edge Function (`photo-urls`) signs URLs only for approved photos of public houses, using a service-role-only database function to decide which paths qualify. | A storage read policy alone: storage RLS cannot express "approved only" together with signing, and it would leave the signing path open to any caller who can sign. An RPC that returns signed URLs: not possible from SQL without a server. |
+
+## Events display via TruckeeVibes (2026-10)
+
+Numbered `TV-D*` after the TruckeeVibes widget plan's own decision numbers (separate from the D-numbers above).
+
+| # | Decision | Chosen | Rejected (and why) |
+| :- | :- | :- | :- |
+| TV-D3 | Map with the widget | Lights draws every pin with its own adapter from the widget controller's data. | A widget-owned map: breaks the Both layer and the shared camera, and needs two maps. |
+| TV-D4 | Script integrity | One immutable, versioned file, pinned here with SRI; every released version stays published. | A floating "latest" URL: unreviewed code on this origin. An npm bundle: not the shared widget. |
+| TV-D7 | Lights events in TruckeeVibes | An exact per-season mirror with its own deletion guard, outside TruckeeVibes ingest. | Ingesting Lights as a source: editorial filters and clustering could drop or merge valid Lights events. Merging two feeds in the browser: two sources of truth. |
+| TV-D8 | Cutover switch | A build flag (`NEXT_PUBLIC_EVENTS_PROVIDER`) plus Pages instant rollback, with a run-time native fallback while the flag exists. | A run-time switch in `site_settings`: a migration for what a short rebuild covers. |

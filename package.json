@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:visual": "node e2e/build-variants.mjs && playwright test",
     "test:functions": "deno test --config supabase/functions/deno.json supabase/functions",
     "db:start": "sh supabase/start-local.sh",
     "db:reset": "supabase db reset && sh supabase/storage-jobs-local.sh",
@@ -26,14 +27,19 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/google.maps": "3.66.5",
     "@types/node": "26.6.4",
+    "@types/pngjs": "6.0.5",
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.0",
+    "pixelmatch": "8.0.0",
+    "pngjs": "7.0.0",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "vitest": "5.0.3"

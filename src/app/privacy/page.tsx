@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageShell } from '@/components/subscribe/parts';
+import { publicEnv } from '@/config/public-env';
 import '@/components/subscribe/subscribe.css';
 
 const TITLE = 'Privacy | Truckee Lights';
@@ -59,6 +60,9 @@ export default function PrivacyPage() {
           <li>Resend sends our emails (sign-in codes and digests).</li>
           <li>Cloudflare hosts the site and runs the Turnstile bot check.</li>
           <li>Google Maps draws the map and looks up addresses when you add a house.</li>
+          {publicEnv.eventsProvider !== 'lights' && (
+            <li>The events list comes from TruckeeVibes (truckeevibes.com). Your browser loads it from truckeevibes.com; it sets no cookies and stores nothing on your device.</li>
+          )}
         </ul>
         <p>We don’t sell or share your email, and there are no ads or tracking pixels in our emails.</p>
 

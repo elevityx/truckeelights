@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DataError } from '@/lib/data/types';
 import {
-  actionsFor, badgeText, buildEventInput, checkReason, displayHost, emptyForm, eventErrorText, 
+  actionsFor, approvalNote, badgeText, buildEventInput, checkReason, displayHost, emptyForm, eventErrorText, 
   parseEventUrl, type EventFormValues,
 } from './eventsState';
 
@@ -122,5 +122,14 @@ describe('eventErrorText', () => {
     expect(eventErrorText(new DataError('invalid_input', 'starts_at'), 'x')).toMatch(/120 days/);
     expect(eventErrorText(new DataError('not_found'), 'x')).toMatch(/gone/);
     expect(eventErrorText(new DataError('network'), 'fb')).toBe('fb');
+  });
+});
+
+// AC-L1-04: the approval note under the filter row, shown only while event display comes from TruckeeVibes.
+describe('approvalNote', () => {
+  it('is null for the native provider and the ~20 min note otherwise', () => {
+    expect(approvalNote('lights')).toBeNull();
+    expect(approvalNote('shadow')).toBe('Approved events show on the map within about 20 minutes.');
+    expect(approvalNote('vibes')).toBe('Approved events show on the map within about 20 minutes.');
   });
 });

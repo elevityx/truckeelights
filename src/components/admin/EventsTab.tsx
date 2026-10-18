@@ -15,9 +15,10 @@ import {
   type EventStatus,
   type RegionContext,
 } from '@/lib/data';
+import { publicEnv } from '@/config/public-env';
 import { switchChecked, switchDisabled, switchFromOpen, switchStatusText, switchTarget, type PhotosSwitch } from './photosState';
 import {
-  FILTERS, FILTER_LABEL, actionsFor, buildEventInput, checkReason, displayHost, emptyForm, eventErrorText, formFromEvent, REASON_MAX,
+  FILTERS, FILTER_LABEL, actionsFor, approvalNote, buildEventInput, checkReason, displayHost, emptyForm, eventErrorText, formFromEvent, REASON_MAX,
   type EventFormValues, type FormErrors,
 } from './eventsState';
 import './events-admin.css';
@@ -127,6 +128,7 @@ export default function EventsTab({ ctx, onForbidden, onChanged }: Props) {
         </div>
         <button className="btn primary" type="button" onClick={() => setAdding((a) => !a)}>{adding ? 'Close form' : 'Add event'}</button>
       </div>
+      {approvalNote(publicEnv.eventsProvider) && <p className="fine">{approvalNote(publicEnv.eventsProvider)}</p>}
       {adding && (
         <EventForm
           key="add"
