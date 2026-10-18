@@ -16,6 +16,17 @@ export function vibesMode(provider: EventsProvider, hasEvents: boolean, state: S
   return state === 'loading' || state === 'ready' ? 'widget' : 'native';
 }
 
+/** L1.1: the widget may show an empty loading list for at most 5 s, counted from page start (script + every API page). */
+export const LOADING_BUDGET_MS = 5000;
+/** Milliseconds left of the loading budget, given the time since page start (performance.now()). */
+export function loadingDeadlineMs(sincePageStart: number): number {
+  return Math.max(0, LOADING_BUDGET_MS - sincePageStart);
+}
+/** The state the mode decision uses: still loading after the budget counts as failed (native), until the widget is ready. */
+export function effectiveState(state: State | 'off', deadlinePassed: boolean): State | 'off' {
+  return state === 'loading' && deadlinePassed ? 'failed' : state;
+}
+
 // ---- handoff reducer -----------------------------------------------------------------------------------
 
 export type Phase = 'steady' | 'toNative' | 'toWidget';

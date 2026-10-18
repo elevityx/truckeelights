@@ -10,7 +10,7 @@ import { eventBounds } from '@/lib/data/events';
 import type { PublicEvent, RegionContext } from '@/lib/data/types';
 import { notEnded } from '@/lib/time/pacific';
 import { loadVibesWidget, type Controller, type State, type WidgetEvent } from './vibes';
-import { handoffStep, INITIAL_HANDOFF, needsWidget, runHandoffActions, sheetGates, vibesMode, type HandoffState, type Phase } from './vibesMode';
+import { effectiveState, handoffStep, INITIAL_HANDOFF, loadingDeadlineMs, needsWidget, runHandoffActions, sheetGates, vibesMode, type HandoffState, type Phase } from './vibesMode';
 
 // useLayoutEffect warns during the static prerender; it only matters in the browser.
 const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -87,6 +87,7 @@ export function useVibes(input: UseVibesInput): UseVibesResult {
   const [loaderFailed, setLoaderFailed] = useState(false);
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [hs, setHs] = useState<HandoffState>(INITIAL_HANDOFF);
+  const [deadlinePassed, setDeadlinePassed] = useState(false);
 
   useIsoLayoutEffect(() => {
     hooksRef.current = hooks;
@@ -147,7 +148,15 @@ export function useVibes(input: UseVibesInput): UseVibesResult {
     };
   }, [active, ctx, provider]);
 
-  const state: State | 'off' = !active ? 'off' : loaderFailed ? 'failed' : wState;
+  // The 5 s loading budget runs from page start, whatever the script or the API pages take; the controller stays alive, so a
+  // later `ready` still switches to the widget (a normal native -> widget handoff).
+  useEffect(() => {
+    if (!active) return;
+    const t = setTimeout(() => setDeadlinePassed(true), loadingDeadlineMs(performance.now()));
+    return () => clearTimeout(t);
+  }, [active]);
+
+  const state: State | 'off' = !active ? 'off' : loaderFailed ? 'failed' : effectiveState(wState, deadlinePassed);
   const target = vibesMode(provider, hasEvents, state, loaderFailed);
   let cur = hs;
   if (target !== hs.mode) {

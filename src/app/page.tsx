@@ -302,7 +302,14 @@ export default function HomePage() {
     };
   }, [vibes.mode, ctx]);
 
-  const openAddEvent = useCallback(() => setSheet('addEvent'), []);
+  // Every host sheet replaces the widget event panel, as it replaces the native EventSheet (one dialog at a time).
+  const openSheet = useCallback((s: Exclude<typeof sheet, null | 'event'>) => {
+    vibesRef.current.whenSteady(() => {
+      vibesRef.current.controller?.close();
+      setSheet(s);
+    });
+  }, []);
+  const openAddEvent = useCallback(() => openSheet('addEvent'), [openSheet]);
 
   const closeSheet = useCallback(() => {
     vibesRef.current.controller?.close();
@@ -393,7 +400,7 @@ export default function HomePage() {
         ctx={ctx}
         onAdd={() => {
           setAddAt(null);
-          setSheet(ctx.events ? 'chooser' : 'add');
+          openSheet(ctx.events ? 'chooser' : 'add');
         }}
         addChooser={ctx.events ? { eventsOpen: ctx.events.open } : undefined}
         menu={subOpen ? <HeaderMenu onSubscribe={() => openSubscribe()} /> : undefined}
@@ -422,7 +429,7 @@ export default function HomePage() {
                 setAddAt((prev) => ({ place, n: (prev?.n ?? 0) + 1 }));
                 setSelectedId(null);
                 setUrlHouse(null);
-                setSheet('add');
+                openSheet('add');
               }}
             />
           ) : ctx.events && layer === 'events' && vibes.mode === 'widget' ? (
@@ -436,7 +443,7 @@ export default function HomePage() {
               season={ctx.season}
               year={ctx.year}
               onOpen={selectEvent}
-              onAdd={ctx.events.open ? () => setSheet('addEvent') : undefined}
+              onAdd={ctx.events.open ? openAddEvent : undefined}
               layerSwitch={inlineSwitch}
             />
           ) : (
