@@ -1,5 +1,12 @@
 import type { Season } from '@/lib/data/types';
 
+/** Where event display comes from: the native UI, the native UI plus a headless TruckeeVibes comparison, or the TruckeeVibes widget. */
+export type EventsProvider = 'lights' | 'shadow' | 'vibes';
+/** Exact 'shadow' / 'vibes' only; anything else (unset, empty, other case, padding) is the native UI. */
+export function parseProvider(v: string | undefined): EventsProvider {
+  return v === 'shadow' || v === 'vibes' ? v : 'lights';
+}
+
 // Each NEXT_PUBLIC_* must be written out literally so Next can inline it at build.
 // Never throw here: `next build` prerenders client pages with empty env in CI.
 export const publicEnv = {
@@ -10,6 +17,7 @@ export const publicEnv = {
   mapIdHalloween: process.env.NEXT_PUBLIC_MAP_ID_HALLOWEEN ?? '',
   mapIdChristmas: process.env.NEXT_PUBLIC_MAP_ID_CHRISTMAS ?? '',
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://truckeelights.com',
+  eventsProvider: parseProvider(process.env.NEXT_PUBLIC_EVENTS_PROVIDER),
 } as const;
 
 export function supabaseConfigured(): boolean {

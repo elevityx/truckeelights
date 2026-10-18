@@ -51,9 +51,9 @@ for (const season of SEASONS) {
       await expect(n.locator('.tv-credit')).toHaveCount(0);
       await unclipList(n);
       await unclipList(w);
-      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
+      const p = parity(await shoot(n, n.locator('.list'), undefined, n.locator('.land-ack')), await shoot(w, w.locator('.list'), credit, w.locator('.land-ack')));
       await attachDiff(info, 'list', p);
-      expect(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
+      expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
       expect(rn.vibesRequests).toEqual([]);
       expect(rw.vibesRequests.length).toBeGreaterThan(0);
     });
@@ -69,9 +69,10 @@ for (const season of SEASONS) {
       await expect(credit).toHaveText('Powered by TruckeeVibes');
       await unclipList(n);
       await unclipList(w);
-      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
+      const head = (pg: Page) => pg.locator('.list-in > .list-head');
+      const p = parity(await shoot(n, n.locator('.list'), undefined, head(n)), await shoot(w, w.locator('.list'), credit, head(w)));
       await attachDiff(info, 'both', p);
-      expect(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
+      expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
     });
 
     test(`AC-L1-08/11 event sheet parity, Escape, focus and ?event=`, async ({ page, phone }, info) => {
@@ -107,7 +108,7 @@ for (const season of SEASONS) {
       await expect(credit).toHaveText('Powered by TruckeeVibes');
       const p = parity(await shoot(n, nativeSheet(n)), await shoot(w, widgetSheet(w), credit));
       await attachDiff(info, 'sheet', p);
-      expect(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
+      expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
       for (const pg of [n, w]) {
         await pg.keyboard.press('Escape');
         expect(await dialogCount(pg)).toBe(0);
@@ -127,9 +128,9 @@ for (const season of SEASONS) {
       await expect(credit).toHaveText('Powered by TruckeeVibes');
       await unclipList(n);
       await unclipList(w);
-      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
+      const p = parity(await shoot(n, n.locator('.list'), undefined, n.locator('.land-ack')), await shoot(w, w.locator('.list'), credit, w.locator('.land-ack')));
       await attachDiff(info, 'empty', p);
-      expect(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
+      expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
       await n.locator('.list .eempty').getByRole('button', { name: 'Add an event' }).click();
       await w.locator('[data-tv-list] .eempty').getByRole('button', { name: 'Add an event' }).click();
       for (const pg of [n, w]) await expect(pg.locator('aside[role=dialog][aria-label="Add an event"]')).toBeVisible();
@@ -191,7 +192,8 @@ for (const season of SEASONS) {
       await widgetReady(page, '[data-tv-upcoming]');
       await page.locator('[data-tv-upcoming]').getByRole('button', { name: 'See all events' }).click();
       await widgetReady(page, '[data-tv-list]');
-      expect(new URL(page.url()).searchParams.get('layer')).toBe('events');
+      await expect(page.locator('[data-tv-upcoming]')).toHaveCount(0);
+      expect(new URL(page.url()).searchParams.get('layer')).toBeNull(); // Events is the default layer: layerUrl drops the param
     });
 
     test(`AC-L1-13 house and event sheets replace each other (widget build)`, async ({ page }) => {

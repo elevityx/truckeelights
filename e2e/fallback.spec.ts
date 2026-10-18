@@ -18,8 +18,8 @@ test('AC-L1-15 API 503: native list, houses and Add a house work, no credit', as
   await boot(page, 'vibes', LIST, { season, api: '503' });
   await expectNativeList(page);
   await noCredit(page);
-  await page.locator('.layerseg button, .layerinline button', { hasText: 'Houses' }).first().click();
-  await expect(page.locator('.list').getByText('101 Fakepine Ln, Truckee, CA')).toBeVisible();
+  await page.getByRole('button', { name: /^Houses/ }).filter({ visible: true }).first().click();
+  await expect(page.locator('.list').getByRole('button', { name: /101 Fakepine Ln, Truckee, CA/ })).toBeVisible();
   await page.getByRole('button', { name: 'Add a house or an event' }).click();
   await page.locator('aside[aria-label="Add to the map"] .opt').first().click();
   await expect(page.locator('aside[role=dialog][aria-label="Add a house"]')).toBeVisible();
@@ -58,7 +58,7 @@ async function openWidgetRow(page: Page, id: string) {
   await expect(widgetSheet(page)).toBeVisible();
   await expect.poll(() => new URL(page.url()).searchParams.get('event')).toBe(id);
 }
-const refresh = (page: Page) => page.clock.runFor(5 * 60_000 + 1000);
+const refresh = (page: Page) => page.clock.fastForward(5 * 60_000 + 1000); // jump: due timers fire once (the 5-min refresh)
 
 for (const to of ['held', 'stale', '503'] as const) {
   test(`AC-L1-17b widget -> native mid-session (${to}): one dialog, same id, native list`, async ({ page }) => {
@@ -157,7 +157,7 @@ test('AC-L1-17c a pin tap during the native -> widget handoff is applied once, a
 for (const build of ['lights', 'vibes'] as const) {
   test(`AC-L1-18 no events capability -> no truckeevibes.com request (${build})`, async ({ page }) => {
     const r = await boot(page, build, '/?view=list', { season, noEvents: true });
-    await expect(page.locator('.list').getByText('101 Fakepine Ln, Truckee, CA')).toBeVisible();
+    await expect(page.locator('.list').getByRole('button', { name: /101 Fakepine Ln, Truckee, CA/ })).toBeVisible();
     await page.waitForTimeout(1000);
     expect(r.vibesRequests).toEqual([]);
   });

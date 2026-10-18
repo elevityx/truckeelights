@@ -47,7 +47,7 @@ export async function widgetReady(page: Page, host: '[data-tv-list]' | '[data-tv
 }
 
 /** The open event sheet: the native Sheet (light DOM) or the widget panel (overlay shadow root). */
-export const nativeSheet = (page: Page) => page.locator('aside[role=dialog][aria-label="Event details"]:not([data-tv-overlay] *)');
+export const nativeSheet = (page: Page) => page.locator('aside[role=dialog][aria-label="Event details"]:not(.tv-panel)');
 export const widgetSheet = (page: Page) => page.locator('[data-tv-overlay] aside[role=dialog]');
 
 /** Counts [role=dialog] across the document and every open shadow root. */
@@ -92,15 +92,17 @@ export interface Shot {
   png: PNG;
   /** Top/bottom of the uncompared credit row, in CSS px relative to the shot's top (widget build only). */
   credit?: { top: number; bottom: number };
+  /** Top of the first content after the credit slot (the land-ack line, or the house list head), CSS px relative to the shot. */
+  anchor?: number;
   scale: number;
 }
 
-/** Screenshot `target`; `credit` (widget build) gives the credit row's box relative to it. */
-export async function shoot(page: Page, target: Locator, credit?: Locator): Promise<Shot> {
+/** Screenshot `target`; `credit` (widget build) gives the credit row's box relative to it; `anchor` the content after it. */
+export async function shoot(page: Page, target: Locator, credit?: Locator, anchor?: Locator): Promise<Shot> {
   await page.evaluate(() => document.fonts.ready);
-  const box = await target.boundingBox();
-  if (!box) throw new Error('shoot: target has no box');
   const buf = await target.screenshot({ animations: 'disabled', caret: 'hide' });
+  const box = await target.boundingBox(); // measured after the shot: it may have scrolled the target into view
+  if (!box) throw new Error('shoot: target has no box');
   const png = PNG.sync.read(buf);
   const scale = png.width / box.width;
   let c: Shot['credit'];
@@ -109,7 +111,13 @@ export async function shoot(page: Page, target: Locator, credit?: Locator): Prom
     if (!cb) throw new Error('shoot: credit has no box');
     c = { top: cb.y - box.y, bottom: cb.y + cb.height - box.y };
   }
-  return { png, credit: c, scale };
+  let a: number | undefined;
+  if (anchor) {
+    const ab = await anchor.boundingBox();
+    if (!ab) throw new Error('shoot: anchor has no box');
+    a = ab.y - box.y;
+  }
+  return { png, credit: c, anchor: a, scale };
 }
 
 function diffRows(a: PNG, ay: number, b: PNG, by: number, h: number, w: number): { diff: number; area: number; img: PNG } {
@@ -124,6 +132,31 @@ function diffRows(a: PNG, ay: number, b: PNG, by: number, h: number, w: number):
   return { diff, area: w * h, img };
 }
 
+/**
+ * Subpixel tolerance: a box at a fractional position (a bottom sheet of fractional height, content displaced by a credit slot of
+ * fractional height) is snapped to whole device pixels box by box, so one global offset cannot line everything up. Regions are
+ * compared in bands of 48 device rows, each at the best offset within +-tol device rows (under one CSS px: 2 at 3x, 1 at 1x) of the measured one.
+ */
+function bestShift(n: PNG, an: number, w: PNG, aw: number, width: number, tol: number, maxH = Infinity): ReturnType<typeof diffRows> {
+  const h = Math.min(n.height - an, w.height - aw, maxH);
+  const img = new PNG({ width, height: Math.max(h, 1) });
+  let diff = 0;
+  for (let y = 0; y < h; y += 48) {
+    const bh = Math.min(48, h - y);
+    let best: ReturnType<typeof diffRows> | null = null;
+    for (let d = -tol; d <= tol; d++) {
+      const ws = aw + y + d;
+      if (ws < 0 || ws + bh > w.height) continue;
+      const r = diffRows(n, an + y, w, ws, bh, width);
+      if (!best || r.diff < best.diff) best = r;
+    }
+    if (!best) best = diffRows(n, an + y, w, aw + y, bh, width);
+    diff += best.diff;
+    best.img.data.copy(img.data, y * width * 4, 0, bh * width * 4);
+  }
+  return { diff, area: Math.max(h, 0) * width, img };
+}
+
 export interface Parity {
   ratio: number;
   diff: number;
@@ -133,10 +166,10 @@ export interface Parity {
 }
 
 /**
- * AC-L1-06..09 A/B rule. Region A = from the top to the credit's top edge, compared at equal offsets; region B = from the credit's
- * bottom edge (widget) to the bottom, compared bottom-aligned with the native shot (so content displaced by the credit, such as the
- * land acknowledgement, is still compared). Only the credit row itself is uncompared. Without a credit (native vs native) the whole
- * shot is compared top-aligned.
+ * AC-L1-06..09 A/B rule. Region A = from the top to the credit's top edge, compared at equal offsets. Region B = the content after
+ * the credit, compared after shifting by the credit's slot: from the anchor (the land-ack line, or the house list head) when both
+ * shots have one, else bottom-aligned (the sheet, whose credit is its last child). So displaced content such as the land
+ * acknowledgement is still compared, and only the credit row (with its own spacing) is uncompared.
  */
 export function parity(native: Shot, widget: Shot): Parity {
   const n = native.png;
@@ -144,6 +177,7 @@ export function parity(native: Shot, widget: Shot): Parity {
   expect(w.width, 'shot widths differ').toBe(n.width);
   const width = n.width;
   const s = widget.scale;
+  const tol = s >= 2 ? 2 : 1;
   let a: ReturnType<typeof diffRows>;
   let b: ReturnType<typeof diffRows>;
   if (!widget.credit) {
@@ -153,9 +187,16 @@ export function parity(native: Shot, widget: Shot): Parity {
     const ct = Math.max(0, Math.round(widget.credit.top * s));
     const cb = Math.min(w.height, Math.round(widget.credit.bottom * s));
     const hA = Math.min(ct, n.height);
-    a = diffRows(n, 0, w, 0, hA, width);
-    const hB = Math.min(w.height - cb, n.height - hA);
-    b = diffRows(n, n.height - hB, w, w.height - hB, hB, width);
+    a = bestShift(n, 0, w, 0, width, tol, hA);
+    if (native.anchor !== undefined && widget.anchor !== undefined) {
+      const an = Math.round(native.anchor * s);
+      const aw = Math.round(widget.anchor * s);
+      expect(aw, 'the anchor must follow the credit').toBeGreaterThanOrEqual(cb);
+      b = bestShift(n, an, w, aw, width, tol);
+    } else {
+      const hB = Math.min(w.height - cb, n.height - hA);
+      b = diffRows(n, n.height - hB, w, w.height - hB, hB, width);
+    }
   }
   const diff = a.diff + b.diff;
   const area = a.area + b.area;

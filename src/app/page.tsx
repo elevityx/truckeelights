@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import AddHouseSheet from '@/components/add/AddHouseSheet';
 import AddChooser from '@/components/events/AddChooser';
 import AddEventSheet from '@/components/events/AddEventSheet';
@@ -9,6 +9,10 @@ import EventSheet from '@/components/events/EventSheet';
 import { EventsView, UpcomingEvents } from '@/components/events/EventsList';
 import { DEFAULT_LAYER, layerUrl, readHouseHint, readLayer, saveHouseHintSeen, saveLayer, showsEvents, showsHouses, type Layer } from '@/components/events/layer';
 import LayerSwitch from '@/components/events/LayerSwitch';
+import { eventShareData } from '@/components/events/links';
+import { useVibes } from '@/components/events/useVibes';
+import { VibesList } from '@/components/events/VibesList';
+import { VibesUpcoming } from '@/components/events/VibesUpcoming';
 import AddPhotosSheet from '@/components/photos/AddPhotosSheet';
 import HouseSheet from '@/components/house/HouseSheet';
 import { setPinTotalListener } from '@/components/house/useHouseVotes';
@@ -46,6 +50,10 @@ import { notEnded } from '@/lib/time/pacific';
 import { useClock } from '@/lib/time/useClock';
 
 const localStore = () => window.localStorage; // may throw; layer.ts catches
+// useLayoutEffect warns during the static prerender; it only matters in the browser.
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+const NO_EVENTS: PublicEvent[] = [];
+const UNKNOWN_EVENT = "That event isn't on the map.";
 
 export default function HomePage() {
   const [ctx, setCtx] = useState<RegionContext | null>(null);
@@ -56,7 +64,7 @@ export default function HomePage() {
   const [subAccount, setSubAccount] = useState<boolean | undefined>(undefined); // Subscribe opened from the post-add nudge
   const [layer, setLayer] = useState<Layer>(DEFAULT_LAYER);
   const [houseHint, setHouseHint] = useState(false); // pulse the Houses button until the switch is used
-  const [events, setEvents] = useState<PublicEvent[]>([]);
+  const [nativeEvents, setNativeEvents] = useState<PublicEvent[] | null>(null); // the Lights read (every provider; the widget's fallback)
   const eventsNow = useClock(); // advances ~every minute and on visibilitychange: grouping and expiry stay current
   const [eventId, setEventId] = useState<string | null>(null);
   const [fitEventsSeq, setFitEventsSeq] = useState(0); // bumped when the map should fit the events (F1)
@@ -80,6 +88,61 @@ export default function HomePage() {
     u.searchParams.delete('event');
     history.replaceState(null, '', u.pathname + u.search + u.hash);
   };
+
+  // Opening an event closes the house sheet, and the reverse. Host state only; selectEvent below picks native or widget.
+  const openEventState = useCallback((id: string) => {
+    setEventId(id);
+    setSelectedId(null);
+    setSheet('event');
+    const u = new URL(window.location.href);
+    u.searchParams.set('event', id);
+    u.searchParams.delete('house');
+    history.replaceState(null, '', u.pathname + u.search + u.hash);
+  }, []);
+
+  // TruckeeVibes widget (NEXT_PUBLIC_EVENTS_PROVIDER; invariant 17). `lights` never loads it and keeps today's UI.
+  const sheetRef = useRef(sheet);
+  const nativeEventsRef = useRef(nativeEvents);
+  const vibes = useVibes({
+    ctx,
+    provider: publicEnv.eventsProvider,
+    nativeEvents,
+    hostOpenEventId: sheet === 'event' ? eventId : null,
+    hooks: {
+      onOpen: openEventState,
+      onClose: () => {
+        if (sheetRef.current !== 'event') return;
+        setSheet(null);
+        setEventId(null);
+        setUrlHouse(null);
+      },
+      onShare: async (e) => {
+        if (!ctx) return;
+        const msg = shareToast(await shareOrCopy(eventShareData(ctx.season, publicEnv.siteUrl, e), navigator));
+        if (msg) showToast(msg);
+      },
+      onHandoff: ({ to, openId }) => {
+        // Host state only: the hook has already closed the panel (to native) or opens it after this commit (to widget).
+        const native = nativeEventsRef.current ?? [];
+        if (to === 'native' && openId && native.some((x) => x.id === openId && notEnded(x, Date.now()))) {
+          setEventId(openId);
+          setSheet('event');
+        } else if ((to === 'native' && openId) || (!openId && sheetRef.current === 'event')) {
+          setSheet(null);
+          setEventId(null);
+          setUrlHouse(null);
+        }
+      },
+    },
+  });
+  const vibesRef = useRef(vibes);
+  useIsoLayoutEffect(() => {
+    sheetRef.current = sheet;
+    nativeEventsRef.current = nativeEvents;
+    vibesRef.current = vibes;
+  });
+  const events = vibes.mode === 'widget' ? vibes.events : (nativeEvents ?? NO_EVENTS);
+  const pendingEventRef = useRef<{ id: string; startLayer: Layer } | null>(null); // ?event= on load, widget build: after the first read
 
   const liveEvents = useMemo(() => events.filter((e) => notEnded(e, eventsNow)), [events, eventsNow]);
   const mapCenter = useCallback(() => mapCenterRef.current?.() ?? null, []);
@@ -124,7 +187,7 @@ export default function HomePage() {
         if (cancelled) return;
         setCtx(c);
         setPins(p);
-        setEvents(evs);
+        setNativeEvents(evs);
         const q = new URLSearchParams(window.location.search);
         if (q.get('view') === 'list') setView('list');
         const startLayer = c.events ? readLayer(window.location.search, localStore) : 'houses';
@@ -136,13 +199,15 @@ export default function HomePage() {
         const h = q.get('house');
         const e = q.get('event');
         if (startLayer === 'events' && !h && !e) setFitEventsSeq((n) => n + 1);
-        if (e) {
+        if (e && publicEnv.eventsProvider === 'vibes' && c.events) {
+          pendingEventRef.current = { id: e, startLayer }; // resolved by the widget's first read, or natively on a fallback
+        } else if (e) {
           if (evs.some((x) => x.id === e && notEnded(x, Date.now()))) {
             setEventId(e);
             setSheet('event');
             if (startLayer === 'houses') setLayer('both'); // show the pin too; not saved as a preference
           } else {
-            showToast("That event isn't on the map.");
+            showToast(UNKNOWN_EVENT);
           }
         } else if (sov?.open && c.subscribe?.open) {
           setSheet(sov.open === 'nudge' ? 'nudgePreview' : 'subscribe');
@@ -169,28 +234,78 @@ export default function HomePage() {
     };
   }, [showToast, routeInit]);
 
+  // Taps wait for a widget handoff to finish (whenSteady; immediate otherwise). The widget panel closes first (idempotent).
   const select = useCallback((id: string) => {
-    setSelectedId(id);
-    setEventId(null);
-    setSheet('house');
-    const u = new URL(window.location.href);
-    u.searchParams.set('house', id);
-    u.searchParams.delete('event');
-    history.replaceState(null, '', u.pathname + u.search + u.hash);
+    vibesRef.current.whenSteady(() => {
+      vibesRef.current.controller?.close();
+      setSelectedId(id);
+      setEventId(null);
+      setSheet('house');
+      const u = new URL(window.location.href);
+      u.searchParams.set('house', id);
+      u.searchParams.delete('event');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    });
   }, []);
 
-  // Opening an event closes the house sheet, and the reverse.
-  const selectEvent = useCallback((id: string) => {
-    setEventId(id);
-    setSelectedId(null);
-    setSheet('event');
-    const u = new URL(window.location.href);
-    u.searchParams.set('event', id);
-    u.searchParams.delete('house');
-    history.replaceState(null, '', u.pathname + u.search + u.hash);
-  }, []);
+  const selectEvent = useCallback(
+    (id: string) => {
+      vibesRef.current.whenSteady(() => {
+        const v = vibesRef.current;
+        if (v.mode !== 'widget') return openEventState(id);
+        if (!v.controller?.open(id)) showToast(UNKNOWN_EVENT); // its 'open' hook sets the host state
+      });
+    },
+    [openEventState, showToast],
+  );
+
+  // ?event= on load in the widget build: open it once the widget has read its data, or natively if it fell back.
+  useEffect(() => {
+    const p = pendingEventRef.current;
+    if (!p || !ctx) return;
+    if (vibes.mode === 'widget') {
+      if (vibes.state !== 'ready' || !vibes.controller) return;
+      pendingEventRef.current = null;
+      const c = vibes.controller;
+      vibes.whenSteady(() => {
+        if (!c.open(p.id)) showToast(UNKNOWN_EVENT);
+        else if (p.startLayer === 'houses') setLayer('both'); // show the pin too; not saved as a preference
+      });
+    } else if (vibes.state !== 'loading' && nativeEvents) {
+      pendingEventRef.current = null;
+      if (nativeEvents.some((x) => x.id === p.id && notEnded(x, Date.now()))) {
+        openEventState(p.id);
+        if (p.startLayer === 'houses') setLayer('both');
+      } else {
+        showToast(UNKNOWN_EVENT);
+      }
+    }
+  }, [ctx, vibes, nativeEvents, openEventState, showToast]);
+
+  // A fallback from the widget re-reads the Lights events once, so the native list is fresh.
+  const prevMode = useRef(vibes.mode);
+  useEffect(() => {
+    const was = prevMode.current;
+    prevMode.current = vibes.mode;
+    if (was !== 'widget' || vibes.mode !== 'native' || !ctx?.events) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const evs = await (await eventsApi()).listEvents(ctx.region.id);
+        if (!cancelled) setNativeEvents(evs);
+      } catch {
+        /* keep the list read at load */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vibes.mode, ctx]);
+
+  const openAddEvent = useCallback(() => setSheet('addEvent'), []);
 
   const closeSheet = useCallback(() => {
+    vibesRef.current.controller?.close();
     setSheet(null);
     setSelectedId(null);
     setEventId(null);
@@ -205,6 +320,7 @@ export default function HomePage() {
     saveLayer(l, localStore);
     history.replaceState(null, '', layerUrl(window.location.href, l));
   }, []);
+  const seeAllEvents = useCallback(() => changeLayer('events'), [changeLayer]);
 
   const reload = async (thenSelect: string, then?: () => void) => {
     if (!ctx) return;
@@ -235,6 +351,7 @@ export default function HomePage() {
   const { has: routeHas, toggle: routeToggle } = route;
   const houseRows = useMemo<RowRoute>(() => ({ has: (id) => routeHas('house', id), toggle: (id) => routeToggle('house', id) }), [routeHas, routeToggle]);
   const openRoute = useCallback(() => {
+    vibesRef.current.controller?.close();
     setSelectedId(null);
     setEventId(null);
     setUrlHouse(null);
@@ -243,6 +360,7 @@ export default function HomePage() {
 
   const subOpen = ctx?.subscribe?.open === true; // A missing or closed capability hides every Subscribe entry point.
   const openSubscribe = (account?: boolean) => {
+    vibes.controller?.close();
     setSubAccount(account);
     setSelectedId(null);
     setEventId(null);
@@ -307,6 +425,8 @@ export default function HomePage() {
                 setSheet('add');
               }}
             />
+          ) : ctx.events && layer === 'events' && vibes.mode === 'widget' ? (
+            <VibesList controller={vibes.controller} layerSwitch={inlineSwitch} onAdd={ctx.events.open ? openAddEvent : undefined} />
           ) : ctx.events && layer === 'events' ? (
             <EventsView
               events={liveEvents}
@@ -329,7 +449,9 @@ export default function HomePage() {
               after={subOpen ? <ListSubscribeFooter onSubscribe={() => openSubscribe()} /> : undefined}
               route={houseRows}
               before={
-                ctx.events && layer === 'both' ? (
+                ctx.events && layer === 'both' && vibes.mode === 'widget' ? (
+                  <VibesUpcoming controller={vibes.controller} onAdd={ctx.events.open ? openAddEvent : undefined} onSeeAll={seeAllEvents} />
+                ) : ctx.events && layer === 'both' ? (
                   <UpcomingEvents
                     events={liveEvents}
                     tz={ctx.region.timezone}
@@ -378,7 +500,7 @@ export default function HomePage() {
           route={{ inRoute: route.has('house', selectedPin.id), onToggle: () => route.toggle('house', selectedPin.id) }}
         />
       )}
-      {sheet === 'event' && selectedEvent && (
+      {sheet === 'event' && selectedEvent && vibes.mode === 'native' && vibes.nativeSheetAllowed && (
         <EventSheet event={selectedEvent} season={ctx.season} year={ctx.year} tz={ctx.region.timezone} region={ctx.region} onClose={closeSheet} onToast={showToast} />
       )}
       {sheet === 'chooser' && ctx.events && (

@@ -122,11 +122,23 @@ Each change enqueues a row in a private `storage_jobs` queue **in the same trans
 
 Voting is one write RPC, `vote_house(house_id, photo_id?)`, for signed-in (anonymous-session) users, plus `my_vote_status` for the caller's remaining votes. It enforces everything in the database, in a fixed lock order (see AGENTS.md): per-device limits (5 votes per house and 60 per day, region-local day), an optional per-network limit (25 per house per day) keyed by a daily salted hash of the Cloudflare client network prefix, and exact flood breakers per house and per region over 10 minutes. The network cap fails open and is enabled by a global admin only after `scripts/probe-network-header.mjs` shows the header is authoritative on the deployed site. Admins see per-house stats, can void votes (last hour, top voter, or reset), and flip the per-region `votes_open` switch from the Votes tab. The UI maps the server's `rate_limited` detail (`house_daily`, `uid_daily`, `network_daily`, `house_breaker`, `region_breaker`) to friendly copy; it never decides limits itself. Local preview without the database: `NEXT_PUBLIC_VOTES_MOCK=1` with `npm run dev` (development only).
 
+## Events display via TruckeeVibes (2026-10)
+
+Behind `NEXT_PUBLIC_EVENTS_PROVIDER` (`lights` default, `shadow`, `vibes`), the event list, the Both-view top 3 and the event sheet can come from the TruckeeVibes widget: one immutable, versioned script (`VIBES_WIDGET` in `src/components/events/vibes.ts`, SRI-pinned, `crossorigin="anonymous"`) that reads `https://truckeevibes.com/api/v1/events?scope=lights` and renders in Shadow DOM with a "Powered by TruckeeVibes" credit. Lights events reach that API through an exact per-season mirror on the TruckeeVibes side; `public.events` stays the submission and moderation store here.
+
+- **Map** (TV-D3): Lights keeps drawing every pin with its own map adapter; the widget controller only hands it the event data.
+- **Integrity** (TV-D4): every widget release is a new file that is never changed or removed; bumping it is a PR here that changes the URL and the integrity together.
+- **Mirror, not ingest** (TV-D7): Lights events are mirrored verbatim, with their ids, so `?event=<id>` links and the Add-event dedupe keep working.
+- **Switch and fallback** (TV-D8): the provider is a build flag (rollback = set `lights` and redeploy, or Pages instant rollback). At run time, `vibes` shows the widget only while it is loading (at most 5 s) or ready; a script error, SRI mismatch, timeout, an API error (the API has no stale fallback and answers 503), held or stale data switches to the native UI, which is always read too. `shadow` runs a headless controller and only logs a count comparison. Switching between the two UIs is a two-phase handoff across a React commit (`vibesMode.ts`), so only one event sheet is ever in the DOM.
+
+`npm run test:visual` compares the two builds pixel by pixel on synthetic fixtures (phone 390 via CDP mobile metrics, desktop 1440), with every API route-mocked.
+
 ## CI
 
 GitHub Actions runs on pull requests and pushes with **no secrets** and no `pull_request_target`. Actions are pinned by commit SHA.
 
 - Job `web`: lint, typecheck, unit tests, build, `npm audit` (high severity, production dependencies), and a privacy grep that fails the build if private material appears in the repo.
+- Job `visual`: builds the `lights` and `vibes` fixture variants and runs the Playwright parity, fallback and CSP-readiness specs (`npm run test:visual`).
 - Job `db`: starts the local Supabase stack, resets the database, then runs the pgTAP suite, the concurrency tests, and the storage tests (`npm run test:storage`, which serves the Edge Function locally).
 
 Migrations are applied to the hosted project by the maintainers after merge.

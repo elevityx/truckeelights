@@ -48,13 +48,19 @@ export interface Routes {
 }
 
 const iso = (t: number) => new Date(t).toISOString();
+/** The hostile rows are dated for the Halloween clock; Christmas moves them by the clock difference (Oct 15 -> Dec 10). */
+const XSS_SHIFT_DAYS = 56;
+function shiftDays(e: Record<string, unknown>, days: number): Record<string, unknown> {
+  const mv = (v: unknown) => (typeof v === 'string' ? iso(Date.parse(v) + days * 86_400_000).replace('.000Z', 'Z') : v);
+  return { ...e, startsAt: mv(e.startsAt), endsAt: mv(e.endsAt) };
+}
 
 function envelope(o: RouteOptions, api: Api): Record<string, unknown> {
   const fx = FIXTURES[o.season];
   const now = Date.parse(fx.now);
   const base = fx.envelope;
   let events = o.empty ? [] : base.events.slice();
-  if (api === 'xss') events = XSS;
+  if (api === 'xss') events = o.season === 'halloween' ? XSS : XSS.map((e) => shiftDays(e, XSS_SHIFT_DAYS));
   if (o.vibesOnly && !o.empty) {
     const first = base.events[1];
     events = [...events, { ...first, id: VIBES_ONLY_ID, origin: 'vibes', title: 'Vibes Only Lantern Night' }];

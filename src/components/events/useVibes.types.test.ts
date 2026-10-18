@@ -13,7 +13,7 @@ const full: UseVibesInput = { ctx: null, provider: 'lights', nativeEvents: null,
 const { onHandoff: _dropped, ...noHandoff } = hooks;
 void _dropped;
 
-export function neverCalled() {
+export function useTypeGuards() {
   useVibes(full);
   // @ts-expect-error nativeEvents is required
   useVibes({ ctx: null, provider: 'lights', hostOpenEventId: null, hooks });

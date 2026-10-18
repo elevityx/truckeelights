@@ -1,5 +1,6 @@
 // Pure helpers for the admin Events tab (Spec_Events §3.6, Amendment 1 A2/A3/A4/A6/A10). No mini-map.
 // The database re-validates everything; these checks are for fast feedback only.
+import type { EventsProvider } from '@/config/public-env';
 import { eventUserMessage } from '@/lib/data/errors';
 import { inEventBoundsAdmin } from '@/lib/data/events';
 import { eventUrlHost } from '@/lib/data/eventUrl';
@@ -18,6 +19,11 @@ export function actionsFor(status: EventStatus): EventAction[] {
     case 'hidden': return ['restore', 'edit'];
     default: return ['restore', 'edit']; // rejected -> approved
   }
+}
+
+/** Under the filter row while event display comes from TruckeeVibes: approvals reach the map through the mirror (~15 min) + cache (5 min). */
+export function approvalNote(provider: EventsProvider): string | null {
+  return provider === 'lights' ? null : 'Approved events show on the map within about 20 minutes.';
 }
 
 export function badgeText(pending: number | null): string {
