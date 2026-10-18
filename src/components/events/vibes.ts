@@ -4,8 +4,8 @@
 import type { Season } from '@/lib/data/types';
 
 export const VIBES_WIDGET = {
-  src: 'https://truckeevibes.com/widget/v1/tv-events.1.0.1.js',
-  integrity: 'sha384-r8WxdnEY9Df/81XkQPPa6St+LMWeuclbzVhJNrHO32EDrt9BpbJ/neCjpivB30PE',
+  src: 'https://truckeevibes.com/widget/v1/tv-events.1.0.2.js',
+  integrity: 'sha384-06AtMAD0fZ9RvtXu5+HeN2H5CXd+oR+W5SvNEoZWuoXH3P0hlQvOpCTVJsXi4ZD1',
 } as const;
 
 // ---- public types, copied from TruckeeVibes widget/src/types.ts (v1) ----

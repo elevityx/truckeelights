@@ -45,7 +45,7 @@ function fakes(onAppend?: (s: FakeScript, win: Record<string, unknown>) => void)
   return { doc: doc as unknown as Document, win: win as unknown as Window, scripts, fire, rawWin: win };
 }
 
-const global1 = { version: '1.0.1', createController: () => ({}) };
+const global1 = { version: '1.0.2', createController: () => ({}) };
 
 beforeEach(() => resetVibesLoader());
 afterEach(() => vi.useRealTimers());
