@@ -51,7 +51,7 @@ for (const season of SEASONS) {
       await expect(n.locator('.tv-credit')).toHaveCount(0);
       await unclipList(n);
       await unclipList(w);
-      const p = parity(await shoot(n, n.locator('.list'), undefined, n.locator('.land-ack')), await shoot(w, w.locator('.list'), credit, w.locator('.land-ack')));
+      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
       await attachDiff(info, 'list', p);
       expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
       expect(rn.vibesRequests).toEqual([]);
@@ -69,8 +69,7 @@ for (const season of SEASONS) {
       await expect(credit).toHaveText('Powered by TruckeeVibes');
       await unclipList(n);
       await unclipList(w);
-      const head = (pg: Page) => pg.locator('.list-in > .list-head');
-      const p = parity(await shoot(n, n.locator('.list'), undefined, head(n)), await shoot(w, w.locator('.list'), credit, head(w)));
+      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
       await attachDiff(info, 'both', p);
       expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
     });
@@ -128,7 +127,7 @@ for (const season of SEASONS) {
       await expect(credit).toHaveText('Powered by TruckeeVibes');
       await unclipList(n);
       await unclipList(w);
-      const p = parity(await shoot(n, n.locator('.list'), undefined, n.locator('.land-ack')), await shoot(w, w.locator('.list'), credit, w.locator('.land-ack')));
+      const p = parity(await shoot(n, n.locator('.list')), await shoot(w, w.locator('.list'), credit));
       await attachDiff(info, 'empty', p);
       expect.soft(p.ratio, `diff ${p.diff}/${p.area} ${p.regions}`).toBeLessThanOrEqual(MAX_DIFF);
       await n.locator('.list .eempty').getByRole('button', { name: 'Add an event' }).click();
@@ -158,14 +157,28 @@ for (const season of SEASONS) {
       }
     });
 
-    test(`AC-L1-12 axe on the widget list and open sheet`, async ({ page }) => {
-      await boot(page, 'vibes', '/?layer=events&view=list', { season });
-      await widgetReady(page, '[data-tv-list]');
-      const scan = () => new AxeBuilder({ page }).include('[data-tv-list]').include('[data-tv-overlay]').analyze();
-      expect(serious(await scan(), season)).toEqual([]);
-      await page.locator('[data-tv-list] .erow').first().click();
-      await expect(widgetSheet(page)).toBeVisible();
-      expect(serious(await scan(), season)).toEqual([]);
+    test(`AC-L1-12 axe on the widget list and open sheet`, async ({ page, phone }, info) => {
+      // Native first: the only findings the widget may carry are ones Lights' own UI has on the same view (same rule, same element
+      // kind, same colours). Raw results of both builds are attached, so "zero" and "filtered" stay distinguishable.
+      const { n, w } = await pair(page, phone, '/?layer=events&view=list', { season });
+      await expect(n.locator('.list .erow').first()).toBeVisible();
+      await widgetReady(w, '[data-tv-list]');
+      const nativeScan = () => new AxeBuilder({ page: n }).include('.list').include('aside[role=dialog]').analyze();
+      const widgetScan = () => new AxeBuilder({ page: w }).include('[data-tv-list]').include('[data-tv-overlay]').analyze();
+      const n1 = await nativeScan();
+      const w1 = await widgetScan();
+      await n.locator('.list .erow').first().click();
+      await w.locator('[data-tv-list] .erow').first().click();
+      await expect(widgetSheet(w)).toBeVisible();
+      const n2 = await nativeScan();
+      const w2 = await widgetScan();
+      await info.attach('axe-raw.json', { body: Buffer.from(JSON.stringify({ native: [n1.violations, n2.violations], widget: [w1.violations, w2.violations] })), contentType: 'application/json' });
+      const known = new Set([...lightsFindings(n1), ...lightsFindings(n2)]);
+      const r1 = unexplained(w1, known);
+      const r2 = unexplained(w2, known);
+      console.log(`axe ${season} ${info.project.name}: widget serious/critical nodes=${countSerious(w1) + countSerious(w2)}, matched to native=${countSerious(w1) + countSerious(w2) - r1.length - r2.length}`);
+      expect(r1).toEqual([]);
+      expect(r2).toEqual([]);
     });
 
     test(`AC-L1-13 interactions on the widget build`, async ({ page }) => {
@@ -242,23 +255,35 @@ for (const season of SEASONS) {
   });
 }
 
-// Known findings from Truckee Lights' own markup/palette, which the widget reproduces for parity (TruckeeVibes W2 baseline):
-// the row's aria-label does not contain its visible text (label-content-name-mismatch), and Christmas --ev on the surface colours
-// is below 4.5:1 (color-contrast). Only those exact nodes inside a widget host are accepted; anything else serious/critical fails.
+// AC-L1-12 needs zero serious/critical violations; the widget reproduces Lights' markup and palette for parity, so two Lights
+// findings recur in it: the row's aria-label not containing its visible text (label-content-name-mismatch on .erow), and Christmas
+// --ev on the surface colours below 4.5:1 (color-contrast on .mo/.t21). A widget node is accepted only when it is one of those two
+// rules on that element kind AND the native build shows the same rule on the same element kind with the same colours.
 type AxeResults = Awaited<ReturnType<AxeBuilder['analyze']>>;
-function serious(r: AxeResults, season: Season): string[] {
+type AxeNode = AxeResults['violations'][number]['nodes'][number];
+const KNOWN: Record<string, RegExp> = { 'label-content-name-mismatch': /\.erow$/, 'color-contrast': /\.(mo|t21)$/ };
+const isSerious = (impact: string | null | undefined) => impact === 'serious' || impact === 'critical';
+const tail = (n: AxeNode) => (n.target.map(String).join(' >>> ').match(/\.[\w-]+$/) ?? [''])[0];
+function findingKey(id: string, n: AxeNode): string | null {
+  if (!KNOWN[id] || !KNOWN[id].test(n.target.map(String).join(' >>> '))) return null;
+  if (id === 'label-content-name-mismatch' && !n.html.startsWith('<button type="button" class="erow"')) return null;
+  const d = (n.any[0]?.data ?? {}) as { fgColor?: string; bgColor?: string };
+  return id === 'color-contrast' ? `${id}|${tail(n)}|${d.fgColor}|${d.bgColor}` : `${id}|${tail(n)}`;
+}
+function lightsFindings(r: AxeResults): string[] {
+  const out: string[] = [];
+  for (const v of r.violations) if (isSerious(v.impact)) for (const n of v.nodes) { const k = findingKey(v.id, n); if (k) out.push(k); }
+  return out;
+}
+const countSerious = (r: AxeResults) => r.violations.filter((v) => isSerious(v.impact)).reduce((a, v) => a + v.nodes.length, 0);
+function unexplained(r: AxeResults, known: Set<string>): string[] {
   const out: string[] = [];
   for (const v of r.violations) {
-    if (v.impact !== 'serious' && v.impact !== 'critical') continue;
-    for (const node of v.nodes) {
-      const target = node.target.map(String).join(' >>> ');
-      const inHost = /^div\[data-tv-(list|upcoming|overlay)(=""|)\]/.test(target) || /data-tv-(list|upcoming|overlay)/.test(target);
-      if (inHost && v.id === 'label-content-name-mismatch' && /\.erow$/.test(target)) continue;
-      if (inHost && v.id === 'color-contrast' && season === 'christmas' && /\.(mo|t21)$/.test(target)) {
-        const d = (node.any[0]?.data ?? {}) as { fgColor?: string };
-        if (d.fgColor === '#e0393e') continue;
-      }
-      out.push(`${v.id}: ${target}`);
+    if (!isSerious(v.impact)) continue;
+    for (const n of v.nodes) {
+      const k = findingKey(v.id, n);
+      if (k && known.has(k)) continue;
+      out.push(`${v.id}: ${n.target.map(String).join(' >>> ')}`);
     }
   }
   return out;

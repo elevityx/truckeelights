@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import type { Page, Request, Route } from '@playwright/test';
 
 export type Season = 'halloween' | 'christmas';
-export type Api = 'ok' | '503' | 'held' | 'stale' | 'old' | 'xss';
+export type Api = 'ok' | '503' | 'held' | 'stale' | 'old' | 'xss' | 'hang';
 export type WidgetFile = 'ok' | 'abort' | 'tamper';
 
 interface Fixture {
@@ -35,6 +35,8 @@ export interface RouteOptions {
   empty?: boolean;
   api?: Api;
   widget?: WidgetFile;
+  /** Real-time delay before each API answer (a slow API). */
+  apiDelayMs?: number;
   /** Adds VIBES_ONLY_ID to the envelope only. */
   vibesOnly?: boolean;
 }
@@ -135,6 +137,8 @@ export async function installRoutes(page: Page, o: RouteOptions): Promise<Routes
       state.apiCalls++;
       const h = { ...cors(req), 'content-type': 'application/json; charset=utf-8' };
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: h });
+      if (state.api === 'hang') return; // never answered: the widget's own 10 s page timeout would be the only limit
+      if (o.apiDelayMs) await new Promise((r) => setTimeout(r, o.apiDelayMs));
       if (state.api === '503') return route.fulfill({ status: 503, headers: { ...h, 'retry-after': '60', 'cache-control': 'no-store' }, body: '{"error":"unavailable"}' });
       return route.fulfill({ status: 200, headers: { ...h, 'cache-control': 'no-store' }, body: JSON.stringify(envelope(o, state.api)) });
     }

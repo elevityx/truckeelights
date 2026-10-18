@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   describeAction,
+  effectiveState,
+  LOADING_BUDGET_MS,
+  loadingDeadlineMs,
   handoffStep,
   INITIAL_HANDOFF,
   needsWidget,
@@ -156,5 +159,22 @@ describe('handoffStep', () => {
     };
     walk(steady('native'), 5);
     walk(steady('widget'), 5);
+  });
+});
+
+// Review P2: the empty loading phase is bounded at 5 s from page start, not by the widget's own API timeouts.
+describe('loading budget', () => {
+  it('is 5 s from page start', () => {
+    expect(LOADING_BUDGET_MS).toBe(5000);
+    expect(loadingDeadlineMs(0)).toBe(5000);
+    expect(loadingDeadlineMs(1200)).toBe(3800);
+    expect(loadingDeadlineMs(7000)).toBe(0);
+  });
+  it('turns a still-loading widget into the native UI once the budget is spent, and only loading', () => {
+    expect(effectiveState('loading', false)).toBe('loading');
+    expect(effectiveState('loading', true)).toBe('failed');
+    for (const s of ['ready', 'held', 'stale', 'failed', 'off'] as const) expect(effectiveState(s, true)).toBe(s);
+    expect(vibesMode('vibes', true, effectiveState('loading', true), false)).toBe('native');
+    expect(vibesMode('vibes', true, effectiveState('ready', true), false)).toBe('widget'); // recovery once ready
   });
 });

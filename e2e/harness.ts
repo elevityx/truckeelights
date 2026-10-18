@@ -92,13 +92,11 @@ export interface Shot {
   png: PNG;
   /** Top/bottom of the uncompared credit row, in CSS px relative to the shot's top (widget build only). */
   credit?: { top: number; bottom: number };
-  /** Top of the first content after the credit slot (the land-ack line, or the house list head), CSS px relative to the shot. */
-  anchor?: number;
   scale: number;
 }
 
-/** Screenshot `target`; `credit` (widget build) gives the credit row's box relative to it; `anchor` the content after it. */
-export async function shoot(page: Page, target: Locator, credit?: Locator, anchor?: Locator): Promise<Shot> {
+/** Screenshot `target`; `credit` (widget build) gives the credit row's box relative to it. */
+export async function shoot(page: Page, target: Locator, credit?: Locator): Promise<Shot> {
   await page.evaluate(() => document.fonts.ready);
   const buf = await target.screenshot({ animations: 'disabled', caret: 'hide' });
   const box = await target.boundingBox(); // measured after the shot: it may have scrolled the target into view
@@ -111,13 +109,7 @@ export async function shoot(page: Page, target: Locator, credit?: Locator, ancho
     if (!cb) throw new Error('shoot: credit has no box');
     c = { top: cb.y - box.y, bottom: cb.y + cb.height - box.y };
   }
-  let a: number | undefined;
-  if (anchor) {
-    const ab = await anchor.boundingBox();
-    if (!ab) throw new Error('shoot: anchor has no box');
-    a = ab.y - box.y;
-  }
-  return { png, credit: c, anchor: a, scale };
+  return { png, credit: c, scale };
 }
 
 function diffRows(a: PNG, ay: number, b: PNG, by: number, h: number, w: number): { diff: number; area: number; img: PNG } {
@@ -166,36 +158,61 @@ export interface Parity {
 }
 
 /**
- * AC-L1-06..09 A/B rule. Region A = from the top to the credit's top edge, compared at equal offsets. Region B = the content after
- * the credit, compared after shifting by the credit's slot: from the anchor (the land-ack line, or the house list head) when both
- * shots have one, else bottom-aligned (the sheet, whose credit is its last child). So displaced content such as the land
- * acknowledgement is still compared, and only the credit row (with its own spacing) is uncompared.
+ * True when [y0, y1) holds no content: every row equals the band's first row (within 12 per channel). Background and vertical
+ * edges (a panel's side border) repeat row after row; text, icons and box edges do not.
+ */
+export function blankRows(p: PNG, y0: number, y1: number): boolean {
+  const top = Math.max(0, y0);
+  const ref = top * p.width * 4;
+  for (let y = top + 1; y < Math.min(p.height, y1); y++) {
+    const r0 = y * p.width * 4;
+    for (let i = 0; i < p.width * 4; i += 4) {
+      for (let c = 0; c < 3; c++) if (Math.abs(p.data[r0 + i + c] - p.data[ref + i + c]) > 12) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * AC-L1-06..09 A/B rule with full coverage of the native shot. Region A = native and widget rows from the top to the credit's top
+ * edge, at equal offsets. Region B = every native row from there to the bottom, against the widget rows after the credit slot
+ * (slot = widget height - native height: the credit row with its own spacing). So displaced content after the credit (the land
+ * acknowledgement, the Both view's house list, the sheet's bottom padding) is still compared, every native row is compared once,
+ * and the only uncompared widget rows are the slot, which must hold the credit and otherwise only background. A missing, extra or
+ * displaced row therefore fails (slot too small, slot holding content, or a pixel diff), never passes silently. A fixed-height box
+ * (slot 0) instead requires the native rows under the credit to be empty.
  */
 export function parity(native: Shot, widget: Shot): Parity {
   const n = native.png;
   const w = widget.png;
-  expect(w.width, 'shot widths differ').toBe(n.width);
+  if (w.width !== n.width) throw new Error(`parity: shot widths differ (${n.width} vs ${w.width})`);
   const width = n.width;
   const s = widget.scale;
   const tol = s >= 2 ? 2 : 1;
   let a: ReturnType<typeof diffRows>;
   let b: ReturnType<typeof diffRows>;
   if (!widget.credit) {
-    a = diffRows(n, 0, w, 0, Math.min(n.height, w.height), width);
+    if (n.height !== w.height) throw new Error(`parity: unmatched tail (heights ${n.height} vs ${w.height})`);
+    a = diffRows(n, 0, w, 0, n.height, width);
     b = diffRows(n, 0, w, 0, 0, width);
   } else {
     const ct = Math.max(0, Math.round(widget.credit.top * s));
     const cb = Math.min(w.height, Math.round(widget.credit.bottom * s));
-    const hA = Math.min(ct, n.height);
-    a = bestShift(n, 0, w, 0, width, tol, hA);
-    if (native.anchor !== undefined && widget.anchor !== undefined) {
-      const an = Math.round(native.anchor * s);
-      const aw = Math.round(widget.anchor * s);
-      expect(aw, 'the anchor must follow the credit').toBeGreaterThanOrEqual(cb);
-      b = bestShift(n, an, w, aw, width, tol);
+    const slot = w.height - n.height;
+    if (ct > n.height) throw new Error(`parity: the native shot (${n.height}) ends before the credit top (${ct}): widget content is extra`);
+    if (slot === 0) {
+      // A fixed-height box (the desktop 400 px panel): the credit sits in rows that are empty in the native box. Those native rows
+      // must be background only; every other row is compared at equal offsets.
+      if (!blankRows(n, ct, cb)) throw new Error(`parity: native rows ${ct}-${cb} under the credit hold content (hidden by the credit?)`);
+      a = bestShift(n, 0, w, 0, width, tol, ct);
+      b = bestShift(n, cb, w, cb, width, tol);
+      if (a.area + b.area + (cb - ct) * width !== n.height * width) throw new Error('parity: not every native row was compared');
     } else {
-      const hB = Math.min(w.height - cb, n.height - hA);
-      b = diffRows(n, n.height - hB, w, w.height - hB, hB, width);
+      if (slot < cb - ct - tol) throw new Error(`parity: the widget is ${cb - ct - slot} rows short of native + credit: content is missing`);
+      if (!blankRows(w, cb + tol, ct + slot - tol)) throw new Error(`parity: widget rows ${cb}-${ct + slot} (credit slot) hold content besides the credit`);
+      a = bestShift(n, 0, w, 0, width, tol, ct);
+      b = bestShift(n, ct, w, ct + slot, width, tol);
+      if (a.area + b.area !== n.height * width) throw new Error('parity: not every native row was compared');
     }
   }
   const diff = a.diff + b.diff;
@@ -207,7 +224,7 @@ export function parity(native: Shot, widget: Shot): Parity {
     ratio: area === 0 ? 1 : diff / area,
     diff,
     area,
-    regions: `A=${a.area / width}px B=${b.area / width}px native=${n.height} widget=${w.height} (device px)`,
+    regions: `A=${a.area / width}px B=${b.area / width}px native=${n.height} widget=${w.height} slot=${widget.credit ? w.height - n.height : 0} (device px)`,
     diffImage: PNG.sync.write(out),
   };
 }

@@ -173,3 +173,50 @@ for (const s of SEASONS) {
     expect(r.vibesRequests).toEqual([]);
   });
 }
+
+// ---- review P2: the 5 s loading budget runs from page start, whatever the API does ---------------------------------
+
+test('AC-L1 budget: a hanging API shows the native list within 5 s of page start', async ({ page }) => {
+  const t0 = Date.now();
+  await boot(page, 'vibes', LIST, { season, api: 'hang' });
+  await expectNativeList(page);
+  expect(Date.now() - t0).toBeLessThan(5000 + 1500); // budget + boot/render slack (the widget's own API timeout is 10 s)
+});
+
+test('AC-L1 budget: a slow API falls back at 5 s, then the widget takes over when it is ready', async ({ page }) => {
+  const t0 = Date.now();
+  await boot(page, 'vibes', LIST, { season, apiDelayMs: 7000 });
+  await expectNativeList(page);
+  expect(Date.now() - t0).toBeLessThan(5000 + 1500);
+  await widgetReady(page, '[data-tv-list]');
+  await expect(page.locator('.list .erow:not([data-tv-list] *)')).toHaveCount(0);
+});
+
+// ---- review P2: Add flows keep the single-dialog invariant ------------------------------------------------------------
+
+test('AC-L1-17 Add chooser and Add sheets never sit beside the widget event panel', async ({ page }) => {
+  await page.addInitScript(DIALOG_PROBE);
+  await boot(page, 'vibes', LIST, { season });
+  await openWidgetRow(page, FIXTURES[season].lightsRows[2].id);
+  // Keyboard path (the panel has no focus trap): Header Add while the event panel is open.
+  await page.getByRole('button', { name: 'Add a house or an event' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('aside[role=dialog][aria-label="Add to the map"]')).toBeVisible();
+  await expect(widgetSheet(page)).toHaveCount(0);
+  expect(await dialogCount(page)).toBe(1);
+  await page.locator('aside[aria-label="Add to the map"] .opt').nth(1).click();
+  await expect(page.locator('aside[role=dialog][aria-label="Add an event"]')).toBeVisible();
+  expect(await dialogCount(page)).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => dialogCount(page)).toBe(0);
+  await expect(widgetSheet(page)).toHaveCount(0);
+  // Event panel -> Header Add -> Add a house.
+  await page.locator('[data-tv-list] .erow').first().click();
+  await expect(widgetSheet(page)).toBeVisible();
+  await page.getByRole('button', { name: 'Add a house or an event' }).focus();
+  await page.keyboard.press('Enter');
+  await page.locator('aside[aria-label="Add to the map"] .opt').first().click();
+  await expect(page.locator('aside[role=dialog][aria-label="Add a house"]')).toBeVisible();
+  expect(await dialogCount(page)).toBe(1);
+  expect((await dialogLog(page)).max).toBe(1);
+});
