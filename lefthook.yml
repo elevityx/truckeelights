@@ -1,0 +1,8 @@
+# lefthook.yml - fast gates only. Slow scans live in CI.
+# Install once per clone after this merges: lefthook install
+# Emergency bypass: LEFTHOOK=0 git commit (never --no-verify).
+min_version: 1.10.0
+pre-commit:
+  commands:
+    gitleaks:
+      run: gitleaks git --staged --redact --no-banner
